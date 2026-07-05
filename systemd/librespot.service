@@ -1,0 +1,23 @@
+[Unit]
+Description=Spotify Connect Receiver
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+User=mopidy
+Group=audio
+EnvironmentFile=-/etc/default/spotify-panel
+ExecStart=/usr/local/bin/librespot \
+  --name "${LIBRESPOT_NAME}" \
+  --backend alsa \
+  --device "${LIBRESPOT_DEVICE}" \
+  --bitrate "${LIBRESPOT_BITRATE}" \
+  --initial-volume "${LIBRESPOT_INITIAL_VOLUME}" \
+  --cache "${LIBRESPOT_CACHE}" \
+  --disable-audio-cache \
+  --onevent /usr/local/bin/spotify-event.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
