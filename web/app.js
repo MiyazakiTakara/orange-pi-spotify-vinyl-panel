@@ -19,6 +19,7 @@ function parseNum(value) {
 function normalizeStatus(raw, title, trackId) {
   const value = String(raw || '').toLowerCase();
   if (['playing', 'paused', 'stopped', 'waiting', 'error'].includes(value)) return value;
+  if (['seeked', 'changed', 'metadata', 'track_changed'].includes(value) && (title || trackId)) return 'playing';
   if ((value === 'unavailable' || value === 'unknown') && (title || trackId)) return 'playing';
   if (!title && !trackId) return 'waiting';
   return value || 'waiting';
