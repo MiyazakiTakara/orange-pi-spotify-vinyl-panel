@@ -191,11 +191,18 @@ function renderDynamic(data) {
   $('timeBadge').textContent = `${formatTime(position)} / ${formatTime(duration)}`;
   $('progressTime').textContent = `${formatTime(position)} / ${formatTime(duration)}`;
 
+  const tonearm = $('tonearm');
   let armRotation = 32;
+
   if (status === 'playing' || status === 'paused') {
-    armRotation = 32 - progress * 22;
+    // Visual direction fixed: start outside the record and move inward as the song progresses.
+    armRotation = 12 + progress * 24;
   }
+
   document.documentElement.style.setProperty('--arm-rotation', `${armRotation.toFixed(2)}deg`);
+  if (tonearm) {
+    tonearm.style.transform = `rotate(${armRotation.toFixed(2)}deg)`;
+  }
 }
 
 async function loadState() {
