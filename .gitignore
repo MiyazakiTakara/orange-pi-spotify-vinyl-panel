@@ -1,0 +1,20 @@
+# Runtime state
+state.json
+last-event.env
+cover.jpg
+*.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local config
+.env
+*.local
+
+# Editors
+.vscode/
+.idea/
+.DS_Store
