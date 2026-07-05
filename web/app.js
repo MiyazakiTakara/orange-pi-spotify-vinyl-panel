@@ -3,7 +3,8 @@ let displayState = null;
 let pendingState = null;
 let pendingSince = 0;
 let latestFetchAt = Date.now();
-let fallbackPollTimer = null;
+let lastServerStateVersion = '';
+let lastRealtimeAt = 0;
 let eventsConnected = false;
 let lastRenderedTrackKey = '';
 let cleanedLegacyRotation = false;
@@ -11,6 +12,8 @@ let cleanedLegacyRotation = false;
 const $ = (id) => document.getElementById(id);
 const TRACK_SWITCH_GUARD_MS = 2500;
 const FALLBACK_PENDING_DELAY_MS = 1800;
+const POLL_INTERVAL_MS = 2000;
+const REALTIME_STALE_MS = 7000;
 
 function parseNum(value) {
   if (value === null || value === undefined || value === '') return 0;
@@ -57,6 +60,20 @@ function computePosition(data, status) {
   }
 
   return { position: Math.max(0, Math.min(duration, position)), duration };
+}
+
+function stateVersion(data) {
+  return [
+    data.track_id || '',
+    data.event || '',
+    data.raw_event || '',
+    data.position_ms || '',
+    data.duration_ms || '',
+    data.state_updated_at || data.updated_at || '',
+    data.playback_updated_at || '',
+    data.metadata_updated_at || '',
+    data.local_thumbnail_url || data.thumbnail_url || ''
+  ].join('|');
 }
 
 function remainingMs(data) {
@@ -220,18 +237,25 @@ function renderDynamic(data) {
   }
 }
 
-function applyState(data) {
+function applyState(data, force = false) {
+  const version = stateVersion(data);
   latestFetchAt = Date.now();
+
+  if (!force && version === lastServerStateVersion && displayState) {
+    return;
+  }
+
+  lastServerStateVersion = version;
   const chosen = chooseDisplayState(data);
   renderStatic(chosen);
   renderDynamic(chosen);
 }
 
-async function loadState() {
+async function loadState(force = false) {
   try {
     const response = await fetch(`/api/state?ts=${Date.now()}`, { cache: 'no-store' });
     const data = await response.json();
-    applyState(data);
+    applyState(data, force);
   } catch (error) {
     const errorBox = $('errorBox');
     errorBox.style.display = 'block';
@@ -239,44 +263,39 @@ async function loadState() {
   }
 }
 
-function startFallbackPolling() {
-  if (fallbackPollTimer) return;
-  fallbackPollTimer = window.setInterval(loadState, 5000);
-}
-
-function stopFallbackPolling() {
-  if (!fallbackPollTimer) return;
-  window.clearInterval(fallbackPollTimer);
-  fallbackPollTimer = null;
-}
-
 function startRealtimeEvents() {
-  if (!window.EventSource) {
-    startFallbackPolling();
-    return;
-  }
+  if (!window.EventSource) return;
 
   const events = new EventSource('/api/events');
 
   events.addEventListener('open', () => {
     eventsConnected = true;
-    stopFallbackPolling();
+    lastRealtimeAt = Date.now();
   });
 
   events.addEventListener('state', (event) => {
+    lastRealtimeAt = Date.now();
     try {
-      applyState(JSON.parse(event.data));
+      applyState(JSON.parse(event.data), true);
     } catch (error) {
       console.warn('Invalid realtime state event', error);
     }
   });
 
-  events.addEventListener('error', () => {
-    if (eventsConnected) {
-      eventsConnected = false;
-    }
-    startFallbackPolling();
+  events.addEventListener('ping', () => {
+    lastRealtimeAt = Date.now();
   });
+
+  events.addEventListener('error', () => {
+    eventsConnected = false;
+  });
+}
+
+function startReliablePolling() {
+  window.setInterval(() => {
+    const realtimeLooksStale = !eventsConnected || Date.now() - lastRealtimeAt > REALTIME_STALE_MS;
+    loadState(realtimeLooksStale);
+  }, POLL_INTERVAL_MS);
 }
 
 function animationLoop() {
@@ -287,6 +306,7 @@ function animationLoop() {
   window.requestAnimationFrame(animationLoop);
 }
 
-loadState();
+loadState(true);
 startRealtimeEvents();
+startReliablePolling();
 window.requestAnimationFrame(animationLoop);
