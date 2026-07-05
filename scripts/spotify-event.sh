@@ -1,134 +1,198 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# This script is executed by librespot --onevent. It must never break playback.
+set +e
 
 STATE_DIR="${SPOTIFY_PANEL_DIR:-/opt/spotify-panel}"
 STATE_FILE="${SPOTIFY_PANEL_STATE:-$STATE_DIR/state.json}"
 ENV_LOG="${SPOTIFY_PANEL_ENV_LOG:-$STATE_DIR/last-event.env}"
 COVER_FILE="${SPOTIFY_PANEL_COVER:-$STATE_DIR/cover.jpg}"
+LAST_GOOD_FILE="${SPOTIFY_PANEL_LAST_GOOD:-$STATE_DIR/last-good-state.json}"
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
-env | sort > "$ENV_LOG" || true
+env | sort > "$ENV_LOG" 2>/dev/null || true
 NOW="$(date -Is)"
 export NOW
 
-python3 - "$STATE_FILE" "$COVER_FILE" <<'PY'
+python3 - "$STATE_FILE" "$COVER_FILE" "$LAST_GOOD_FILE" <<'PY'
 import json
 import os
 import sys
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
-state_file = sys.argv[1]
-cover_file = sys.argv[2]
-state_dir = os.path.dirname(state_file) or "."
-os.makedirs(state_dir, exist_ok=True)
+state_file = Path(sys.argv[1])
+cover_file = Path(sys.argv[2])
+last_good_file = Path(sys.argv[3])
+state_dir = state_file.parent
+
+try:
+    state_dir.mkdir(parents=True, exist_ok=True)
+except Exception:
+    sys.exit(0)
 
 
-def read_old():
+def read_json(path):
     try:
-        with open(state_file, "r", encoding="utf-8") as handle:
+        with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
             return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
 
-def write_state(data):
-    tmp = state_file + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, ensure_ascii=False, indent=2)
-    os.replace(tmp, state_file)
+def write_json_atomic(path, data):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+
+def env_value(name):
+    return os.environ.get(name, "")
 
 
 def env_or_old(name, old, key):
-    value = os.environ.get(name, "")
+    value = env_value(name)
     return value if value != "" else old.get(key, "")
 
 
-def display_event(raw_event, old):
+def normalize_event(raw_event, old, has_track):
     event = (raw_event or "unknown").lower()
-    # librespot emits seeked while playback continues. The UI should keep spinning.
-    if event in {"seeked", "changed", "metadata", "track_changed"}:
-        old_event = str(old.get("event", "playing")).lower()
-        if old_event in {"paused", "stopped", "waiting"}:
+    old_event = str(old.get("event", "playing")).lower()
+
+    if event in {"playing", "paused", "stopped", "waiting", "error"}:
+        return event
+    if event in {"pause"}:
+        return "paused"
+    if event in {"end_of_track", "session_disconnected", "inactive"}:
+        return "stopped"
+    if event in {"seeked", "volume_set"}:
+        return "paused" if old_event == "paused" else "playing"
+    if event in {"changed", "metadata", "track_changed", "unavailable", "unknown", "resumed"}:
+        if old_event in {"paused", "stopped", "waiting"} and event in {"metadata", "changed"}:
             return old_event
-        return "playing"
-    return event
+        return "playing" if has_track else old_event
+    return "playing" if has_track else "waiting"
 
 
-old = read_old()
-raw_event = os.environ.get("PLAYER_EVENT", "unknown")
-event = display_event(raw_event, old)
-track_id = os.environ.get("TRACK_ID", "")
-old_track_id = os.environ.get("OLD_TRACK_ID", "")
+def spotify_track_url(track_id):
+    clean_id = track_id.split(":")[-1] if track_id.startswith("spotify:track:") else track_id
+    return clean_id, ("https://open.spotify.com/track/" + clean_id if clean_id else "")
 
-if not track_id:
-    data = dict(old)
-    data["updated_at"] = os.environ.get("NOW", "")
-    data["event"] = event
-    data["raw_event"] = raw_event
-    data["position_ms"] = env_or_old("POSITION_MS", old, "position_ms")
-    data["duration_ms"] = env_or_old("DURATION_MS", old, "duration_ms")
-    data["volume"] = env_or_old("VOLUME", old, "volume")
-    data["shuffle"] = env_or_old("SHUFFLE", old, "shuffle")
-    data["repeat"] = env_or_old("REPEAT", old, "repeat")
-    write_state(data)
-    sys.exit(0)
 
-clean_id = track_id.split(":")[-1] if track_id.startswith("spotify:track:") else track_id
-spotify_url = "https://open.spotify.com/track/" + clean_id if clean_id else ""
-same_track = track_id == old.get("track_id", "")
+def fetch_metadata(spotify_url, clean_id):
+    if not spotify_url:
+        return {}, ""
 
-title = old.get("title", "") if same_track else ""
-author = old.get("author", "") if same_track else ""
-thumbnail_url = old.get("thumbnail_url", "") if same_track else ""
-local_thumbnail_url = old.get("local_thumbnail_url", "") if same_track else ""
-provider = old.get("provider", "") if same_track else ""
-oembed_error = ""
-
-if spotify_url and not same_track:
     try:
         oembed_url = "https://open.spotify.com/oembed?url=" + urllib.parse.quote(spotify_url, safe="")
-        req = urllib.request.Request(oembed_url, headers={"User-Agent": "OrangePiSpotifyVinylPanel/0.1"})
+        req = urllib.request.Request(oembed_url, headers={"User-Agent": "OrangePiSpotifyVinylPanel/0.2"})
         with urllib.request.urlopen(req, timeout=8) as response:
             meta = json.loads(response.read().decode("utf-8"))
 
-        title = meta.get("title", "")
-        author = meta.get("author_name", "")
         thumbnail_url = meta.get("thumbnail_url", "")
-        provider = meta.get("provider_name", "")
+        local_thumbnail_url = ""
 
         if thumbnail_url:
-            img_req = urllib.request.Request(thumbnail_url, headers={"User-Agent": "OrangePiSpotifyVinylPanel/0.1"})
-            with urllib.request.urlopen(img_req, timeout=12) as img_response:
-                image_data = img_response.read()
-            tmp_cover = cover_file + ".tmp"
-            with open(tmp_cover, "wb") as handle:
-                handle.write(image_data)
-            os.replace(tmp_cover, cover_file)
-            local_thumbnail_url = "/cover.jpg?track=" + clean_id
-    except Exception as exc:
-        oembed_error = str(exc)
+            try:
+                img_req = urllib.request.Request(thumbnail_url, headers={"User-Agent": "OrangePiSpotifyVinylPanel/0.2"})
+                with urllib.request.urlopen(img_req, timeout=12) as img_response:
+                    image_data = img_response.read()
+                tmp_cover = cover_file.with_name(cover_file.name + ".tmp")
+                with tmp_cover.open("wb") as handle:
+                    handle.write(image_data)
+                os.replace(tmp_cover, cover_file)
+                local_thumbnail_url = "/cover.jpg?track=" + clean_id
+            except Exception:
+                local_thumbnail_url = ""
 
-state = {
-    "updated_at": os.environ.get("NOW", ""),
+        return {
+            "title": meta.get("title", ""),
+            "author": meta.get("author_name", ""),
+            "thumbnail_url": thumbnail_url,
+            "local_thumbnail_url": local_thumbnail_url,
+            "provider": meta.get("provider_name", ""),
+        }, ""
+    except Exception as exc:
+        return {}, str(exc)
+
+
+old = read_json(state_file)
+if not old:
+    old = read_json(last_good_file)
+
+raw_event = env_value("PLAYER_EVENT") or "unknown"
+track_id = env_value("TRACK_ID")
+old_track_id = env_value("OLD_TRACK_ID")
+has_track = bool(track_id or old.get("track_id") or old.get("title"))
+event = normalize_event(raw_event, old, has_track)
+now = env_value("NOW")
+
+# Build from old state first. This prevents blank librespot events from wiping metadata.
+state = dict(old)
+state.update({
+    "schema_version": 2,
+    "updated_at": now,
+    "state_updated_at": now,
     "event": event,
     "raw_event": raw_event,
-    "track_id": track_id,
+    "previous_event": old.get("event", ""),
     "old_track_id": old_track_id,
-    "spotify_url": spotify_url,
-    "title": title,
-    "author": author,
-    "thumbnail_url": thumbnail_url,
-    "local_thumbnail_url": local_thumbnail_url,
-    "provider": provider,
-    "oembed_error": oembed_error,
     "position_ms": env_or_old("POSITION_MS", old, "position_ms"),
     "duration_ms": env_or_old("DURATION_MS", old, "duration_ms"),
     "volume": env_or_old("VOLUME", old, "volume"),
     "shuffle": env_or_old("SHUFFLE", old, "shuffle"),
     "repeat": env_or_old("REPEAT", old, "repeat"),
-}
+})
 
-write_state(state)
+if env_value("POSITION_MS") or env_value("DURATION_MS"):
+    state["playback_updated_at"] = now
+else:
+    state["playback_updated_at"] = old.get("playback_updated_at", old.get("updated_at", now))
+
+if track_id:
+    clean_id, spotify_url = spotify_track_url(track_id)
+    same_track = track_id == old.get("track_id", "")
+
+    state["track_id"] = track_id
+    state["spotify_url"] = spotify_url
+
+    if not same_track:
+        meta, error = fetch_metadata(spotify_url, clean_id)
+        state["oembed_error"] = error
+        if meta:
+            state.update(meta)
+            state["metadata_updated_at"] = now
+        else:
+            state["metadata_updated_at"] = old.get("metadata_updated_at", old.get("updated_at", now))
+    else:
+        state["title"] = old.get("title", "")
+        state["author"] = old.get("author", "")
+        state["thumbnail_url"] = old.get("thumbnail_url", "")
+        state["local_thumbnail_url"] = old.get("local_thumbnail_url", "")
+        state["provider"] = old.get("provider", "")
+        state["oembed_error"] = ""
+        state["metadata_updated_at"] = old.get("metadata_updated_at", old.get("updated_at", now))
+else:
+    # No track_id in this event. Keep last good track metadata and only update runtime status/position.
+    state["track_id"] = old.get("track_id", "")
+    state["spotify_url"] = old.get("spotify_url", "")
+    state["title"] = old.get("title", "")
+    state["author"] = old.get("author", "")
+    state["thumbnail_url"] = old.get("thumbnail_url", "")
+    state["local_thumbnail_url"] = old.get("local_thumbnail_url", "")
+    state["provider"] = old.get("provider", "")
+    state["metadata_updated_at"] = old.get("metadata_updated_at", old.get("updated_at", now))
+
+if write_json_atomic(state_file, state):
+    if state.get("track_id") and (state.get("title") or state.get("author")):
+        write_json_atomic(last_good_file, state)
 PY
+
+exit 0
