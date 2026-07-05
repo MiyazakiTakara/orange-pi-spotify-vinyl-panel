@@ -3,13 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .paths import COVER_FILE, HOST, PORT, WEB_DIR
+from .paths import COVER_FILE, HOST, PORT, STATE_FILE, WEB_DIR
 from .state import read_state
-from .paths import STATE_FILE
 
 
 def content_type(path: Path) -> str:
@@ -23,8 +23,16 @@ def content_type(path: Path) -> str:
     return "application/octet-stream"
 
 
+def state_version() -> str:
+    try:
+        stat = STATE_FILE.stat()
+        return f"{stat.st_mtime_ns}:{stat.st_size}"
+    except FileNotFoundError:
+        return "missing"
+
+
 class VinylPanelHandler(BaseHTTPRequestHandler):
-    server_version = "SpotifyVinylPanel/0.1"
+    server_version = "SpotifyVinylPanel/0.2"
 
     def log_message(self, fmt: str, *args: object) -> None:
         print("%s - - [%s] %s" % (self.client_address[0], self.log_date_time_string(), fmt % args))
@@ -41,9 +49,51 @@ class VinylPanelHandler(BaseHTTPRequestHandler):
         payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
         self.send_bytes(status, payload, "application/json; charset=utf-8")
 
+    def send_sse_event(self, event: str, data: dict | str) -> None:
+        if isinstance(data, str):
+            payload = data
+        else:
+            payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+
+        frame = f"event: {event}\ndata: {payload}\n\n".encode("utf-8")
+        self.wfile.write(frame)
+        self.wfile.flush()
+
+    def stream_events(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        last_version = ""
+        last_ping = 0.0
+
+        try:
+            while True:
+                current_version = state_version()
+                now = time.monotonic()
+
+                if current_version != last_version:
+                    last_version = current_version
+                    self.send_sse_event("state", read_state(STATE_FILE))
+                    last_ping = now
+                elif now - last_ping >= 15:
+                    self.send_sse_event("ping", str(int(now)))
+                    last_ping = now
+
+                time.sleep(0.4)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         route = parsed.path
+
+        if route == "/api/events":
+            self.stream_events()
+            return
 
         if route in ("/api/state", "/state.json"):
             self.send_json(200, read_state(STATE_FILE))
