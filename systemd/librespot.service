@@ -7,6 +7,9 @@ Wants=network-online.target
 User=mopidy
 Group=audio
 EnvironmentFile=-/etc/default/spotify-panel
+# Make sure the event hook can write runtime files even after manual cleanup.
+ExecStartPre=+/usr/bin/install -d -o mopidy -g audio -m 775 /opt/spotify-panel
+ExecStartPre=+/usr/bin/install -d -o mopidy -g audio -m 775 /var/cache/librespot
 ExecStart=/usr/local/bin/librespot \
   --name "${LIBRESPOT_NAME}" \
   --backend alsa \
