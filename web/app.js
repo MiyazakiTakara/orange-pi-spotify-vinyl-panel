@@ -5,6 +5,8 @@ let pendingSince = 0;
 let latestFetchAt = Date.now();
 let fallbackPollTimer = null;
 let eventsConnected = false;
+let lastRenderedTrackKey = '';
+let cleanedLegacyRotation = false;
 
 const $ = (id) => document.getElementById(id);
 const TRACK_SWITCH_GUARD_MS = 2500;
@@ -19,7 +21,7 @@ function parseNum(value) {
 function normalizeStatus(raw, title, trackId) {
   const value = String(raw || '').toLowerCase();
   if (['playing', 'paused', 'stopped', 'waiting', 'error'].includes(value)) return value;
-  if (['seeked', 'changed', 'metadata', 'track_changed'].includes(value) && (title || trackId)) return 'playing';
+  if (['seeked', 'changed', 'metadata', 'track_changed', 'volume_set'].includes(value) && (title || trackId)) return 'playing';
   if ((value === 'unavailable' || value === 'unknown') && (title || trackId)) return 'playing';
   if (!title && !trackId) return 'waiting';
   return value || 'waiting';
@@ -50,8 +52,8 @@ function computePosition(data, status) {
 
   let position = base;
   if (status === 'playing') {
-    const updatedAt = Date.parse(data.updated_at || '');
-    position += Number.isNaN(updatedAt) ? Date.now() - latestFetchAt : Date.now() - updatedAt;
+    const playbackUpdatedAt = Date.parse(data.playback_updated_at || data.updated_at || '');
+    position += Number.isNaN(playbackUpdatedAt) ? Date.now() - latestFetchAt : Date.now() - playbackUpdatedAt;
   }
 
   return { position: Math.max(0, Math.min(duration, position)), duration };
@@ -136,7 +138,9 @@ function setCover(src) {
   }
 }
 
-function clearOldManualRotation() {
+function clearOldManualRotationOnce() {
+  if (cleanedLegacyRotation) return;
+  cleanedLegacyRotation = true;
   const record = document.querySelector('.record.spin');
   const cover = document.querySelector('.label-cover.spin');
   if (record) {
@@ -156,6 +160,16 @@ function renderStatic(data) {
   const status = normalizeStatus(data.event, data.title, data.track_id);
   const thumb = data.local_thumbnail_url || data.thumbnail_url || '';
   const error = data.oembed_error || data.error || '';
+  const trackKey = `${trackId}|${title}|${author}|${thumb}|${status}`;
+
+  if (trackKey === lastRenderedTrackKey) {
+    $('updatedAt').textContent = `Aktualizacja: ${data.state_updated_at || data.updated_at || 'Brak danych'}`;
+    $('miniStatus').textContent = statusLabel(status);
+    return;
+  }
+
+  lastRenderedTrackKey = trackKey;
+  clearOldManualRotationOnce();
 
   $('title').textContent = title;
   $('artist').textContent = author;
@@ -163,7 +177,7 @@ function renderStatic(data) {
   $('progressArtist').textContent = author;
   $('trackIdBox').textContent = trackId;
   $('spotifyBtn').href = data.spotify_url || '#';
-  $('updatedAt').textContent = `Aktualizacja: ${data.updated_at || 'Brak danych'}`;
+  $('updatedAt').textContent = `Aktualizacja: ${data.state_updated_at || data.updated_at || 'Brak danych'}`;
   $('miniStatus').textContent = statusLabel(status);
   $('shuffleValue').textContent = data.shuffle === '' || data.shuffle === undefined ? '—' : String(data.shuffle);
   $('repeatValue').textContent = data.repeat === '' || data.repeat === undefined ? '—' : String(data.repeat);
@@ -173,7 +187,6 @@ function renderStatic(data) {
   badge.className = `chip status ${status}`;
   $('vinylStage').className = `vinyl-stage ${status}`;
   setCover(thumb);
-  clearOldManualRotation();
 
   const errorBox = $('errorBox');
   if (error) {
