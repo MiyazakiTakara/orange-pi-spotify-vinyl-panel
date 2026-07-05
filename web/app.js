@@ -3,13 +3,10 @@ let displayState = null;
 let pendingState = null;
 let pendingSince = 0;
 let latestFetchAt = Date.now();
-let lastFrameAt = 0;
-let recordRotation = 0;
 
 const $ = (id) => document.getElementById(id);
 const TRACK_SWITCH_GUARD_MS = 2500;
 const FALLBACK_PENDING_DELAY_MS = 1800;
-const RECORD_ROTATION_MS = 2800;
 
 function parseNum(value) {
   if (value === null || value === undefined || value === '') return 0;
@@ -136,6 +133,19 @@ function setCover(src) {
   }
 }
 
+function clearOldManualRotation() {
+  const record = document.querySelector('.record.spin');
+  const cover = document.querySelector('.label-cover.spin');
+  if (record) {
+    record.style.animation = '';
+    record.style.transform = '';
+  }
+  if (cover) {
+    cover.style.animation = '';
+    cover.style.transform = '';
+  }
+}
+
 function renderStatic(data) {
   const title = data.title || 'Czekam na utwór...';
   const author = data.author || 'Spotify Connect';
@@ -160,6 +170,7 @@ function renderStatic(data) {
   badge.className = `chip status ${status}`;
   $('vinylStage').className = `vinyl-stage ${status}`;
   setCover(thumb);
+  clearOldManualRotation();
 
   const errorBox = $('errorBox');
   if (error) {
@@ -182,29 +193,9 @@ function renderDynamic(data) {
 
   let armRotation = 32;
   if (status === 'playing' || status === 'paused') {
-    armRotation = 10 + progress * 22;
+    armRotation = 32 - progress * 22;
   }
   document.documentElement.style.setProperty('--arm-rotation', `${armRotation.toFixed(2)}deg`);
-}
-
-function renderManualRotation(now) {
-  const record = document.querySelector('.record.spin');
-  const cover = document.querySelector('.label-cover.spin');
-  if (!record || !cover || !displayState) return;
-
-  const status = normalizeStatus(displayState.event, displayState.title, displayState.track_id);
-  if (!lastFrameAt) lastFrameAt = now;
-  const delta = Math.min(80, Math.max(0, now - lastFrameAt));
-  lastFrameAt = now;
-
-  if (status === 'playing') {
-    recordRotation = (recordRotation + (delta / RECORD_ROTATION_MS) * 360) % 360;
-  }
-
-  record.style.animation = 'none';
-  cover.style.animation = 'none';
-  record.style.transform = `translate3d(0, 0, 0) rotateZ(${recordRotation.toFixed(3)}deg)`;
-  cover.style.transform = `translate(-50%, -50%) translate3d(0, 0, 0) rotateZ(${recordRotation.toFixed(3)}deg)`;
 }
 
 async function loadState() {
@@ -222,11 +213,10 @@ async function loadState() {
   }
 }
 
-function animationLoop(now) {
+function animationLoop() {
   maybeCommitPending();
   if (displayState) {
     renderDynamic(displayState);
-    renderManualRotation(now);
   }
   window.requestAnimationFrame(animationLoop);
 }
