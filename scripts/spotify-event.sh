@@ -6,7 +6,7 @@ STATE_FILE="${SPOTIFY_PANEL_STATE:-$STATE_DIR/state.json}"
 ENV_LOG="${SPOTIFY_PANEL_ENV_LOG:-$STATE_DIR/last-event.env}"
 COVER_FILE="${SPOTIFY_PANEL_COVER:-$STATE_DIR/cover.jpg}"
 
-mkdir -p "$STATE_DIR"
+mkdir -p "$STATE_DIR" 2>/dev/null || true
 env | sort > "$ENV_LOG" || true
 NOW="$(date -Is)"
 export NOW
@@ -20,12 +20,15 @@ import urllib.request
 
 state_file = sys.argv[1]
 cover_file = sys.argv[2]
+state_dir = os.path.dirname(state_file) or "."
+os.makedirs(state_dir, exist_ok=True)
 
 
 def read_old():
     try:
         with open(state_file, "r", encoding="utf-8") as handle:
-            return json.load(handle)
+            data = json.load(handle)
+            return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
@@ -42,8 +45,20 @@ def env_or_old(name, old, key):
     return value if value != "" else old.get(key, "")
 
 
+def display_event(raw_event, old):
+    event = (raw_event or "unknown").lower()
+    # librespot emits seeked while playback continues. The UI should keep spinning.
+    if event in {"seeked", "changed", "metadata", "track_changed"}:
+        old_event = str(old.get("event", "playing")).lower()
+        if old_event in {"paused", "stopped", "waiting"}:
+            return old_event
+        return "playing"
+    return event
+
+
 old = read_old()
-event = os.environ.get("PLAYER_EVENT", "unknown")
+raw_event = os.environ.get("PLAYER_EVENT", "unknown")
+event = display_event(raw_event, old)
 track_id = os.environ.get("TRACK_ID", "")
 old_track_id = os.environ.get("OLD_TRACK_ID", "")
 
@@ -51,6 +66,12 @@ if not track_id:
     data = dict(old)
     data["updated_at"] = os.environ.get("NOW", "")
     data["event"] = event
+    data["raw_event"] = raw_event
+    data["position_ms"] = env_or_old("POSITION_MS", old, "position_ms")
+    data["duration_ms"] = env_or_old("DURATION_MS", old, "duration_ms")
+    data["volume"] = env_or_old("VOLUME", old, "volume")
+    data["shuffle"] = env_or_old("SHUFFLE", old, "shuffle")
+    data["repeat"] = env_or_old("REPEAT", old, "repeat")
     write_state(data)
     sys.exit(0)
 
@@ -92,6 +113,7 @@ if spotify_url and not same_track:
 state = {
     "updated_at": os.environ.get("NOW", ""),
     "event": event,
+    "raw_event": raw_event,
     "track_id": track_id,
     "old_track_id": old_track_id,
     "spotify_url": spotify_url,
