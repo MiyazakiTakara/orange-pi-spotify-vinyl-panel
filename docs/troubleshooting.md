@@ -1,5 +1,18 @@
 # Troubleshooting
 
+## Quick diagnostics
+
+Open these endpoints in a browser:
+
+```text
+http://ORANGE_PI_IP:8080/health
+http://ORANGE_PI_IP:8080/api/debug
+http://ORANGE_PI_IP:8080/api/state
+http://ORANGE_PI_IP:8080/api/state/raw
+```
+
+`/api/state` is normalized for the UI. `/api/state/raw` shows the raw file written by the event hook.
+
 ## Panel does not start
 
 ```bash
@@ -10,7 +23,7 @@ sudo journalctl -u spotify-panel -n 100 --no-pager -l
 Check Python syntax:
 
 ```bash
-PYTHONPATH=/opt/spotify-panel/src python3 -m py_compile /opt/spotify-panel/src/vinyl_panel/server.py
+PYTHONPATH=/opt/spotify-panel/src python3 -m py_compile /opt/spotify-panel/src/vinyl_panel/server.py /opt/spotify-panel/src/vinyl_panel/state.py
 ```
 
 ## Spotify device is not visible
@@ -35,7 +48,25 @@ sudo systemctl restart librespot
 ```bash
 cat /opt/spotify-panel/last-event.env
 cat /opt/spotify-panel/state.json
+cat /opt/spotify-panel/last-good-state.json
 ```
+
+Also check:
+
+```text
+/api/debug
+```
+
+## Seek freezes the UI
+
+The event hook normalizes `seeked` to `playing` unless the previous stable state was paused. After updating the app, reinstall and restart both services:
+
+```bash
+sudo ./install.sh
+sudo systemctl restart spotify-panel librespot
+```
+
+Then hard-refresh the browser.
 
 ## Cover loads slowly
 
