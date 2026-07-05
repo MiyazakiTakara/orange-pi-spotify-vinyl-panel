@@ -1,0 +1,16 @@
+[Unit]
+Description=Spotify Vinyl Now Playing Panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mopidy
+Group=audio
+EnvironmentFile=-/etc/default/spotify-panel
+WorkingDirectory=/opt/spotify-panel
+ExecStart=/usr/bin/python3 -m vinyl_panel.server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
