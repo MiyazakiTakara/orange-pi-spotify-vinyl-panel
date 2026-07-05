@@ -1,7 +1,15 @@
-let latestState = null;
+let sourceState = null;
+let displayState = null;
+let pendingState = null;
+let pendingSince = 0;
 let latestFetchAt = Date.now();
+let lastFrameAt = 0;
+let recordRotation = 0;
 
 const $ = (id) => document.getElementById(id);
+const TRACK_SWITCH_GUARD_MS = 2500;
+const FALLBACK_PENDING_DELAY_MS = 1800;
+const RECORD_ROTATION_MS = 2800;
 
 function parseNum(value) {
   if (value === null || value === undefined || value === '') return 0;
@@ -47,6 +55,73 @@ function computePosition(data, status) {
   }
 
   return { position: Math.max(0, Math.min(duration, position)), duration };
+}
+
+function remainingMs(data) {
+  const status = normalizeStatus(data.event, data.title, data.track_id);
+  const { position, duration } = computePosition(data, status);
+  if (duration <= 0) return 0;
+  return Math.max(0, duration - position);
+}
+
+function shouldDelayTrackSwitch(nextState) {
+  if (!displayState || !nextState) return false;
+  if (!displayState.track_id || !nextState.track_id) return false;
+  if (displayState.track_id === nextState.track_id) return false;
+
+  const oldStatus = normalizeStatus(displayState.event, displayState.title, displayState.track_id);
+  if (oldStatus !== 'playing' && oldStatus !== 'paused') return false;
+
+  const oldDuration = parseNum(displayState.duration_ms);
+  if (oldDuration <= 0) {
+    return Date.now() - pendingSince < FALLBACK_PENDING_DELAY_MS;
+  }
+
+  return remainingMs(displayState) > TRACK_SWITCH_GUARD_MS;
+}
+
+function chooseDisplayState(nextState) {
+  sourceState = nextState;
+
+  if (!displayState) {
+    displayState = nextState;
+    pendingState = null;
+    pendingSince = 0;
+    return displayState;
+  }
+
+  if (displayState.track_id !== nextState.track_id && shouldDelayTrackSwitch(nextState)) {
+    pendingState = nextState;
+    if (!pendingSince) pendingSince = Date.now();
+    return displayState;
+  }
+
+  displayState = nextState;
+  pendingState = null;
+  pendingSince = 0;
+  return displayState;
+}
+
+function maybeCommitPending() {
+  if (!pendingState || !displayState) return;
+
+  const duration = parseNum(displayState.duration_ms);
+  const elapsedPending = Date.now() - pendingSince;
+
+  if (duration <= 0 && elapsedPending >= FALLBACK_PENDING_DELAY_MS) {
+    displayState = pendingState;
+    pendingState = null;
+    pendingSince = 0;
+    renderStatic(displayState);
+    return;
+  }
+
+  if (remainingMs(displayState) <= TRACK_SWITCH_GUARD_MS) {
+    displayState = pendingState;
+    pendingState = null;
+    pendingSince = 0;
+    renderStatic(displayState);
+  }
 }
 
 function setCover(src) {
@@ -112,14 +187,34 @@ function renderDynamic(data) {
   document.documentElement.style.setProperty('--arm-rotation', `${armRotation.toFixed(2)}deg`);
 }
 
+function renderManualRotation(now) {
+  const record = document.querySelector('.record.spin');
+  const cover = document.querySelector('.label-cover.spin');
+  if (!record || !cover || !displayState) return;
+
+  const status = normalizeStatus(displayState.event, displayState.title, displayState.track_id);
+  if (!lastFrameAt) lastFrameAt = now;
+  const delta = Math.min(80, Math.max(0, now - lastFrameAt));
+  lastFrameAt = now;
+
+  if (status === 'playing') {
+    recordRotation = (recordRotation + (delta / RECORD_ROTATION_MS) * 360) % 360;
+  }
+
+  record.style.animation = 'none';
+  cover.style.animation = 'none';
+  record.style.transform = `translate3d(0, 0, 0) rotateZ(${recordRotation.toFixed(3)}deg)`;
+  cover.style.transform = `translate(-50%, -50%) translate3d(0, 0, 0) rotateZ(${recordRotation.toFixed(3)}deg)`;
+}
+
 async function loadState() {
   try {
     const response = await fetch(`/api/state?ts=${Date.now()}`, { cache: 'no-store' });
     const data = await response.json();
-    latestState = data;
     latestFetchAt = Date.now();
-    renderStatic(data);
-    renderDynamic(data);
+    const chosen = chooseDisplayState(data);
+    renderStatic(chosen);
+    renderDynamic(chosen);
   } catch (error) {
     const errorBox = $('errorBox');
     errorBox.style.display = 'block';
@@ -127,11 +222,15 @@ async function loadState() {
   }
 }
 
-function animationLoop() {
-  if (latestState) renderDynamic(latestState);
+function animationLoop(now) {
+  maybeCommitPending();
+  if (displayState) {
+    renderDynamic(displayState);
+    renderManualRotation(now);
+  }
   window.requestAnimationFrame(animationLoop);
 }
 
 loadState();
-animationLoop();
+window.requestAnimationFrame(animationLoop);
 setInterval(loadState, 5000);
