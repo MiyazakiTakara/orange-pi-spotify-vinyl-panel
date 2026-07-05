@@ -3,13 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .paths import COVER_FILE, HOST, PORT, STATE_FILE, WEB_DIR
-from .state import read_state
+from .state import read_raw_state, read_state
 
 
 def content_type(path: Path) -> str:
@@ -31,8 +32,39 @@ def state_version() -> str:
         return "missing"
 
 
+def path_status(path: Path) -> dict:
+    exists = path.exists()
+    parent = path.parent
+    return {
+        "path": str(path),
+        "exists": exists,
+        "is_file": path.is_file() if exists else False,
+        "is_dir": path.is_dir() if exists else False,
+        "size": path.stat().st_size if exists and path.is_file() else None,
+        "parent_exists": parent.exists(),
+        "parent_writable": os.access(parent, os.W_OK) if parent.exists() else False,
+    }
+
+
+def debug_payload() -> dict:
+    state = read_state(STATE_FILE)
+    raw = read_raw_state(STATE_FILE)
+    return {
+        "ok": state.get("event") != "error",
+        "server_time": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "state_version": state_version(),
+        "state": state,
+        "raw_state": raw,
+        "paths": {
+            "state_file": path_status(STATE_FILE),
+            "cover_file": path_status(COVER_FILE),
+            "web_dir": path_status(WEB_DIR),
+        },
+    }
+
+
 class VinylPanelHandler(BaseHTTPRequestHandler):
-    server_version = "SpotifyVinylPanel/0.2"
+    server_version = "SpotifyVinylPanel/0.3"
 
     def log_message(self, fmt: str, *args: object) -> None:
         print("%s - - [%s] %s" % (self.client_address[0], self.log_date_time_string(), fmt % args))
@@ -83,13 +115,26 @@ class VinylPanelHandler(BaseHTTPRequestHandler):
                     self.send_sse_event("ping", str(int(now)))
                     last_ping = now
 
-                time.sleep(0.4)
+                time.sleep(0.25)
         except (BrokenPipeError, ConnectionResetError):
             return
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         route = parsed.path
+
+        if route == "/health":
+            state = read_state(STATE_FILE)
+            self.send_json(200, {"ok": state.get("event") != "error", "event": state.get("event"), "state_version": state_version()})
+            return
+
+        if route == "/api/debug":
+            self.send_json(200, debug_payload())
+            return
+
+        if route == "/api/state/raw":
+            self.send_json(200, read_raw_state(STATE_FILE))
+            return
 
         if route == "/api/events":
             self.stream_events()
