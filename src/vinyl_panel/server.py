@@ -24,6 +24,14 @@ def content_type(path: Path) -> str:
     return "application/octet-stream"
 
 
+def asset_cache(path: Path) -> str:
+    # Keep this project easy to iterate on while testing on Orange Pi.
+    # Browser cache was making users see old app.js/styles.css until a hard refresh.
+    if path.name == "index.html" or path.suffix in {".js", ".css"}:
+        return "no-store"
+    return "public, max-age=3600"
+
+
 def state_version() -> str:
     try:
         stat = STATE_FILE.stat()
@@ -64,7 +72,7 @@ def debug_payload() -> dict:
 
 
 class VinylPanelHandler(BaseHTTPRequestHandler):
-    server_version = "SpotifyVinylPanel/0.3"
+    server_version = "SpotifyVinylPanel/0.4"
 
     def log_message(self, fmt: str, *args: object) -> None:
         print("%s - - [%s] %s" % (self.client_address[0], self.log_date_time_string(), fmt % args))
@@ -166,8 +174,7 @@ class VinylPanelHandler(BaseHTTPRequestHandler):
             self.send_bytes(404, b"not found", "text/plain; charset=utf-8")
             return
 
-        cache = "no-store" if target.name == "index.html" else "public, max-age=3600"
-        self.send_bytes(200, target.read_bytes(), content_type(target), cache=cache)
+        self.send_bytes(200, target.read_bytes(), content_type(target), cache=asset_cache(target))
 
 
 def main() -> None:
