@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orange Pi Audio</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="page">
+    <section class="app-shell">
+      <aside class="info-panel">
+        <div class="eyebrow">Orange Pi Audio</div>
+        <h1 class="hero-title" id="title">Czekam na utwór...</h1>
+        <div class="hero-artist" id="artist">Spotify Connect</div>
+
+        <div class="status-row">
+          <span class="chip status waiting" id="statusBadge">Czekam na Spotify</span>
+          <span class="chip" id="timeBadge">00:00 / 00:00</span>
+          <span class="chip" id="updatedAt">Brak danych</span>
+        </div>
+
+        <div class="actions">
+          <a class="button primary" id="spotifyBtn" href="#" target="_blank" rel="noopener noreferrer">Otwórz w Spotify</a>
+          <a class="button secondary" href="/api/state" target="_blank" rel="noopener noreferrer">JSON</a>
+        </div>
+
+        <div class="debug-card">
+          <div class="debug-label">Track ID</div>
+          <div class="codebox" id="trackIdBox">—</div>
+          <div class="mini-grid">
+            <div class="mini-card"><span>Status</span><strong id="miniStatus">Czekam</strong></div>
+            <div class="mini-card"><span>Źródło</span><strong>Spotify</strong></div>
+            <div class="mini-card"><span>Shuffle</span><strong id="shuffleValue">—</strong></div>
+            <div class="mini-card"><span>Repeat</span><strong id="repeatValue">—</strong></div>
+          </div>
+          <div class="error" id="errorBox"></div>
+        </div>
+      </aside>
+
+      <section class="turntable-panel">
+        <div class="turntable-box">
+          <div class="deck">
+            <div class="deck-layout">
+              <div class="platter-area">
+                <div class="vinyl-stage waiting" id="vinylStage">
+                  <div class="platter"></div>
+                  <div class="record spin"></div>
+                  <div class="label-cover spin" id="coverHolder"><div class="no-cover">♪</div></div>
+                  <div class="tonearm-area">
+                    <div class="arm-base"></div>
+                    <div class="arm" id="tonearm"><div class="stylus"></div></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="knobs">
+                <div class="knob-unit"><div class="knob knob-a"></div><span>Volume</span></div>
+                <div class="knob-unit"><div class="knob knob-b"></div><span>Tone</span></div>
+                <div class="knob-unit"><div class="knob knob-c"></div><span>Mode</span></div>
+              </div>
+            </div>
+
+            <div class="now-playing-strip">
+              <div class="strip-text">
+                <strong id="progressTitle">Czekam na utwór...</strong>
+                <span id="progressArtist">Spotify Connect</span>
+              </div>
+              <div class="strip-time" id="progressTime">00:00 / 00:00</div>
+            </div>
+
+            <div class="progress-shell">
+              <div class="progress-glow"></div>
+              <div class="progress-fill"></div>
+            </div>
+
+            <div class="deck-footer">Vinyl UI • Orange Pi • Spotify Connect</div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
