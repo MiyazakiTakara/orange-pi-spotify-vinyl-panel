@@ -3,6 +3,8 @@ let displayState = null;
 let pendingState = null;
 let pendingSince = 0;
 let latestFetchAt = Date.now();
+let fallbackPollTimer = null;
+let eventsConnected = false;
 
 const $ = (id) => document.getElementById(id);
 const TRACK_SWITCH_GUARD_MS = 2500;
@@ -195,7 +197,6 @@ function renderDynamic(data) {
   let armRotation = 32;
 
   if (status === 'playing' || status === 'paused') {
-    // Visual direction fixed: start outside the record and move inward as the song progresses.
     armRotation = 12 + progress * 24;
   }
 
@@ -205,19 +206,63 @@ function renderDynamic(data) {
   }
 }
 
+function applyState(data) {
+  latestFetchAt = Date.now();
+  const chosen = chooseDisplayState(data);
+  renderStatic(chosen);
+  renderDynamic(chosen);
+}
+
 async function loadState() {
   try {
     const response = await fetch(`/api/state?ts=${Date.now()}`, { cache: 'no-store' });
     const data = await response.json();
-    latestFetchAt = Date.now();
-    const chosen = chooseDisplayState(data);
-    renderStatic(chosen);
-    renderDynamic(chosen);
+    applyState(data);
   } catch (error) {
     const errorBox = $('errorBox');
     errorBox.style.display = 'block';
     errorBox.textContent = `Nie udało się pobrać stanu panelu: ${error}`;
   }
+}
+
+function startFallbackPolling() {
+  if (fallbackPollTimer) return;
+  fallbackPollTimer = window.setInterval(loadState, 5000);
+}
+
+function stopFallbackPolling() {
+  if (!fallbackPollTimer) return;
+  window.clearInterval(fallbackPollTimer);
+  fallbackPollTimer = null;
+}
+
+function startRealtimeEvents() {
+  if (!window.EventSource) {
+    startFallbackPolling();
+    return;
+  }
+
+  const events = new EventSource('/api/events');
+
+  events.addEventListener('open', () => {
+    eventsConnected = true;
+    stopFallbackPolling();
+  });
+
+  events.addEventListener('state', (event) => {
+    try {
+      applyState(JSON.parse(event.data));
+    } catch (error) {
+      console.warn('Invalid realtime state event', error);
+    }
+  });
+
+  events.addEventListener('error', () => {
+    if (eventsConnected) {
+      eventsConnected = false;
+    }
+    startFallbackPolling();
+  });
 }
 
 function animationLoop() {
@@ -229,5 +274,5 @@ function animationLoop() {
 }
 
 loadState();
+startRealtimeEvents();
 window.requestAnimationFrame(animationLoop);
-setInterval(loadState, 5000);
