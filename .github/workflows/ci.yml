@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Compile Python files
+        run: |
+          python -m py_compile src/vinyl_panel/server.py src/vinyl_panel/state.py
+      - name: Validate shell script syntax
+        run: |
+          bash -n scripts/spotify-event.sh
+          bash -n install.sh
+          bash -n uninstall.sh
+      - name: Check required web files
+        run: |
+          test -f web/index.html
+          test -f web/styles.css
+          test -f web/app.js
