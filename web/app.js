@@ -54,6 +54,7 @@ let visualFrameId = null;
 let lastVisualFrameAt = 0;
 let lastSseMessageAt = 0;
 let lastRenderedRevision = -1;
+let lastPlaybackKey = '';
 let lastTrackId = '';
 let lastCoverSrc = '';
 let lastProgressScale = -1;
@@ -121,7 +122,7 @@ function normalizedState(payload) {
       status: playback.status || payload.event || 'waiting',
       position_ms: number(playback.position_ms ?? payload.position_ms),
       duration_ms: number(playback.duration_ms || current.duration_ms || payload.duration_ms),
-      updated_at: playback.updated_at || payload.playback_updated_at || payload.updated_at || ''
+      updated_at: playback.updated_at || payload.playback_updated_at || ''
     },
     controls: {
       volume: controls.volume ?? payload.volume ?? '',
@@ -131,6 +132,16 @@ function normalizedState(payload) {
     },
     session
   };
+}
+
+function playbackKey(payload) {
+  return [
+    payload.current_track.id,
+    payload.playback.status,
+    payload.playback.position_ms,
+    payload.playback.duration_ms,
+    payload.playback.updated_at
+  ].join('|');
 }
 
 function setConnection(mode, text) {
@@ -306,9 +317,16 @@ function applyState(payload, force = false) {
   const revision = number(next.server_revision ?? next.revision, 0);
   if (!force && revision && revision <= lastRenderedRevision) return;
 
+  const nextPlaybackKey = playbackKey(next);
+  const playbackChanged = !state || nextPlaybackKey !== lastPlaybackKey;
+
   state = next;
   if (revision) lastRenderedRevision = revision;
-  applyPlaybackAnchor(next);
+  if (playbackChanged) {
+    applyPlaybackAnchor(next);
+    lastPlaybackKey = nextPlaybackKey;
+  }
+
   renderStatic(next);
   renderVisuals();
   renderClock();
@@ -422,9 +440,12 @@ function handleVisibilityChange() {
     stopVisualLoop();
     return;
   }
-  fetchState(true);
-  connectEvents();
+
+  renderVisuals();
+  renderClock();
   syncVisualLoop();
+  fetchState(false);
+  connectEvents();
 }
 
 ui.spotify.addEventListener('click', (event) => {
@@ -433,7 +454,7 @@ ui.spotify.addEventListener('click', (event) => {
 
 document.addEventListener('visibilitychange', handleVisibilityChange);
 window.addEventListener('online', () => {
-  fetchState(true);
+  fetchState(false);
   connectEvents();
 });
 window.addEventListener('offline', () => {
