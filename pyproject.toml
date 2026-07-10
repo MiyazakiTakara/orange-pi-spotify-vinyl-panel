@@ -1,6 +1,6 @@
 [project]
 name = "orange-pi-spotify-vinyl-panel"
-version = "0.1.0"
+version = "1.0.0rc1"
 description = "Spotify Connect now-playing vinyl-style panel for Orange Pi"
 requires-python = ">=3.9"
 readme = "README.md"
