@@ -39,13 +39,14 @@ jobs:
       - name: Validate JavaScript syntax
         run: node --check web/app.js
 
-      - name: Check required web files
+      - name: Check minimal frontend assets
         run: |
           test -f web/index.html
-          test -f web/styles.css
-          test -f web/vinyl-performance.css
+          test -f web/player.css
           test -f web/app.js
-          grep -q 'vinyl-performance.css' web/index.html
+          grep -q 'player.css?v=7' web/index.html
+          grep -q 'app.js?v=7' web/index.html
+          ! grep -q 'styles.css\|vinyl-performance.css' web/index.html
 
       - name: Verify no network calls remain in event hook
         run: |

@@ -4,62 +4,40 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#080a0f">
   <title>Orange Pi Audio</title>
-  <link rel="stylesheet" href="/styles.css">
-  <link rel="stylesheet" href="/vinyl-performance.css">
+  <link rel="stylesheet" href="/player.css?v=7">
+  <script src="/app.js?v=7" defer></script>
 </head>
 <body>
-  <main class="page minimal-player">
-    <section class="app-shell">
-      <section class="turntable-panel">
-        <div class="turntable-box">
-          <div class="deck">
-            <div class="platter-area">
-              <div class="vinyl-stage waiting" id="vinylStage">
-                <div class="platter"></div>
-                <div class="record" id="record">
-                  <div class="record-rotor spin">
-                    <div class="label-cover" id="coverHolder"><div class="no-cover">♪</div></div>
-                  </div>
-                </div>
-                <div class="tonearm-area">
-                  <div class="arm-base"></div>
-                  <div class="arm" id="tonearm"><div class="stylus"></div></div>
-                </div>
+  <main class="player">
+    <section class="turntable" aria-label="Odtwarzany utwór">
+      <div class="plinth">
+        <div class="platter-stage">
+          <div class="platter" aria-hidden="true"></div>
+
+          <div class="record" aria-hidden="true">
+            <div class="record-rotor" id="recordRotor">
+              <div class="label-cover" id="coverHolder">
+                <div class="cover-placeholder">♪</div>
               </div>
             </div>
+          </div>
 
-            <div class="now-playing-strip minimal-meta">
-              <div class="strip-text">
-                <strong id="progressTitle">Czekam na utwór...</strong>
-              </div>
-              <div class="strip-time" id="progressTime">00:00 / 00:00</div>
+          <div class="tonearm" aria-hidden="true">
+            <div class="tonearm-base"></div>
+            <div class="tonearm-arm" id="tonearm">
+              <div class="stylus"></div>
             </div>
           </div>
         </div>
-      </section>
+      </div>
+
+      <div class="track-info" id="trackInfo" aria-live="polite">
+        <h1 class="track-title" id="trackTitle">Czekam na utwór...</h1>
+        <time class="playtime" id="playtime">00:00 / 00:00</time>
+      </div>
     </section>
   </main>
-
-  <div class="visually-hidden" aria-hidden="true">
-    <h1 id="title"></h1>
-    <div id="artist"></div>
-    <div id="progressArtist"></div>
-    <div id="trackIdBox"></div>
-    <a id="spotifyBtn" href="#"></a>
-    <div id="updatedAt"></div>
-    <div id="miniStatus"></div>
-    <div id="clientValue"></div>
-    <div id="shuffleValue"></div>
-    <div id="repeatValue"></div>
-    <div id="statusBadge"></div>
-    <div id="connectionBadge"></div>
-    <div id="errorBox"></div>
-    <div id="timeBadge"></div>
-    <div id="progressGlow"></div>
-    <div id="progressFill"></div>
-  </div>
-
-  <script src="/app.js"></script>
 </body>
 </html>
