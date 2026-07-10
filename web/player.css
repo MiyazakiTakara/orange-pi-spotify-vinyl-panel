@@ -241,11 +241,12 @@ body {
 .track-title {
   width: 100%;
   margin: 0;
+  padding: .08em .04em .18em;
   overflow: hidden;
   color: #f8f9fc;
   font-size: clamp(24px, 4vw, 42px);
   font-weight: 760;
-  line-height: 1.08;
+  line-height: 1.16;
   letter-spacing: -.025em;
   text-overflow: ellipsis;
   white-space: nowrap;
