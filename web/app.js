@@ -149,9 +149,9 @@ function renderVisuals() {
 
   let rotation;
   if (state.playback.status === 'playing' || state.playback.status === 'paused') {
-    rotation = 16 + progress * 10;
+    rotation = 14.5 + progress * 8.5;
   } else {
-    rotation = 2;
+    rotation = 0;
   }
 
   ui.tonearm.setAttribute('transform', `rotate(${rotation.toFixed(3)} 278 42)`);
