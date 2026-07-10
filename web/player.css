@@ -164,10 +164,29 @@ body {
   shape-rendering: geometricPrecision;
 }
 
-.tonearm-tube {
-  stroke: url(#armMetal);
-  stroke-width: 10;
+.tonearm-tube-shadow,
+.tonearm-tube,
+.tonearm-tube-highlight {
+  fill: none;
   stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tonearm-tube-shadow {
+  stroke: #171b22;
+  stroke-width: 15;
+  opacity: .72;
+}
+
+.tonearm-tube {
+  stroke: #b9c1cc;
+  stroke-width: 9;
+}
+
+.tonearm-tube-highlight {
+  stroke: #f3f5f8;
+  stroke-width: 2.2;
+  opacity: .48;
 }
 
 .tonearm-counterweight {
@@ -178,19 +197,19 @@ body {
 
 .tonearm-headshell {
   fill: #181d26;
-  stroke: #4a5260;
-  stroke-width: 1.2;
+  stroke: #596271;
+  stroke-width: 1.4;
 }
 
 .tonearm-cartridge {
   fill: #303744;
-  stroke: #707988;
+  stroke: #7a8493;
   stroke-width: 1;
 }
 
 .tonearm-stylus {
-  stroke: #d59732;
-  stroke-width: 2.2;
+  stroke: #e1a23a;
+  stroke-width: 2.6;
   stroke-linecap: round;
 }
 
