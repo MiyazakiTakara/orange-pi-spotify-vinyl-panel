@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
   <title>Orange Pi Audio</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -16,13 +17,14 @@
 
         <div class="status-row">
           <span class="chip status waiting" id="statusBadge">Czekam na Spotify</span>
+          <span class="chip connection connecting" id="connectionBadge">Łączenie...</span>
           <span class="chip" id="timeBadge">00:00 / 00:00</span>
           <span class="chip" id="updatedAt">Brak danych</span>
         </div>
 
         <div class="actions">
-          <a class="button primary" id="spotifyBtn" href="#" target="_blank" rel="noopener noreferrer">Otwórz w Spotify</a>
-          <a class="button secondary" href="/api/state" target="_blank" rel="noopener noreferrer">JSON</a>
+          <a class="button primary disabled" id="spotifyBtn" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">Otwórz w Spotify</a>
+          <a class="button secondary" href="/api/debug" target="_blank" rel="noopener noreferrer">Diagnostyka</a>
         </div>
 
         <div class="debug-card">
@@ -30,7 +32,7 @@
           <div class="codebox" id="trackIdBox">—</div>
           <div class="mini-grid">
             <div class="mini-card"><span>Status</span><strong id="miniStatus">Czekam</strong></div>
-            <div class="mini-card"><span>Źródło</span><strong>Spotify</strong></div>
+            <div class="mini-card"><span>Klient</span><strong id="clientValue">—</strong></div>
             <div class="mini-card"><span>Shuffle</span><strong id="shuffleValue">—</strong></div>
             <div class="mini-card"><span>Repeat</span><strong id="repeatValue">—</strong></div>
           </div>
@@ -45,8 +47,9 @@
               <div class="platter-area">
                 <div class="vinyl-stage waiting" id="vinylStage">
                   <div class="platter"></div>
-                  <div class="record spin"></div>
-                  <div class="label-cover spin" id="coverHolder"><div class="no-cover">♪</div></div>
+                  <div class="record spin" id="record">
+                    <div class="label-cover" id="coverHolder"><div class="no-cover">♪</div></div>
+                  </div>
                   <div class="tonearm-area">
                     <div class="arm-base"></div>
                     <div class="arm" id="tonearm"><div class="stylus"></div></div>
@@ -69,7 +72,7 @@
               <div class="strip-time" id="progressTime">00:00 / 00:00</div>
             </div>
 
-            <div class="progress-shell">
+            <div class="progress-shell" aria-hidden="true">
               <div class="progress-glow"></div>
               <div class="progress-fill"></div>
             </div>

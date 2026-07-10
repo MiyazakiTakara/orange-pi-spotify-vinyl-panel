@@ -9,19 +9,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Compile Python files
         run: |
-          python -m py_compile src/vinyl_panel/server.py src/vinyl_panel/state.py
+          python -m py_compile \
+            src/vinyl_panel/server.py \
+            src/vinyl_panel/state.py \
+            src/vinyl_panel/event_hook.py
+
+      - name: Run Python regression tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+
       - name: Validate shell script syntax
         run: |
           bash -n scripts/spotify-event.sh
           bash -n install.sh
           bash -n uninstall.sh
+
+      - name: Validate JavaScript syntax
+        run: node --check web/app.js
+
       - name: Check required web files
         run: |
           test -f web/index.html
           test -f web/styles.css
           test -f web/app.js
+
+      - name: Verify no network calls remain in event hook
+        run: |
+          ! grep -R "urllib.request\|open.spotify.com/oembed" src/vinyl_panel/event_hook.py scripts/spotify-event.sh

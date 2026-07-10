@@ -18,7 +18,13 @@ if ! id "$APP_USER" >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "$APP_DIR" "$APP_DIR/web" "$PYTHON_SITE" /var/cache/librespot
+install -d -o "$APP_USER" -g "$APP_GROUP" -m 775 \
+  "$APP_DIR" \
+  "$APP_DIR/web" \
+  "$PYTHON_SITE" \
+  "$APP_DIR/covers" \
+  /var/cache/librespot
+
 rm -rf "$PYTHON_SITE/vinyl_panel"
 cp -r src/vinyl_panel "$PYTHON_SITE/"
 cp web/index.html web/styles.css web/app.js "$APP_DIR/web/"
@@ -34,21 +40,31 @@ else
   echo "Fresh defaults were written to $CONFIG_EXAMPLE"
 fi
 
-chmod +x /usr/local/bin/spotify-event.sh
+chmod 755 /usr/local/bin/spotify-event.sh
 chown -R "$APP_USER:$APP_GROUP" "$APP_DIR" /var/cache/librespot
-chown "$APP_USER:$APP_GROUP" /usr/local/bin/spotify-event.sh
-chmod 775 "$APP_DIR" /var/cache/librespot
+chown root:root /usr/local/bin/spotify-event.sh
 
-sed -i "s|ExecStart=/usr/bin/python3 -m vinyl_panel.server|ExecStart=/usr/bin/env PYTHONPATH=$PYTHON_SITE /usr/bin/python3 -m vinyl_panel.server|" /etc/systemd/system/spotify-panel.service
+PYTHONPATH="$PYTHON_SITE" python3 -m py_compile \
+  "$PYTHON_SITE/vinyl_panel/server.py" \
+  "$PYTHON_SITE/vinyl_panel/state.py" \
+  "$PYTHON_SITE/vinyl_panel/event_hook.py"
 
-PYTHONPATH="$PYTHON_SITE" python3 -m py_compile "$PYTHON_SITE/vinyl_panel/server.py" "$PYTHON_SITE/vinyl_panel/state.py"
 systemctl daemon-reload
-systemctl enable --now spotify-panel.service
+systemctl enable spotify-panel.service
+systemctl restart spotify-panel.service
 
 if command -v /usr/local/bin/librespot >/dev/null 2>&1; then
-  systemctl enable --now librespot.service
+  systemctl enable librespot.service
+  systemctl restart librespot.service
 else
   echo "WARNING: /usr/local/bin/librespot was not found. Install librespot before enabling Spotify Connect." >&2
+fi
+
+sleep 1
+if ! systemctl is-active --quiet spotify-panel.service; then
+  echo "ERROR: spotify-panel.service failed to start" >&2
+  systemctl status spotify-panel.service --no-pager >&2 || true
+  exit 1
 fi
 
 ip_addr=$(hostname -I | awk '{print $1}')
