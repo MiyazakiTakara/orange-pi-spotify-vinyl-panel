@@ -11,6 +11,7 @@ const POLL_INTERVAL_MS = 5000;
 const SSE_STALE_MS = 35000;
 const VISUAL_INTERVAL_MS = 100;
 const CLOCK_INTERVAL_MS = 1000;
+const MAX_UNBOUNDED_TIMESTAMP_AGE_MS = 24 * 60 * 60 * 1000;
 
 let state = null;
 let playbackAnchor = {
@@ -36,6 +37,12 @@ function asNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function clampPosition(positionMs, durationMs) {
+  const position = Math.max(0, asNumber(positionMs));
+  const duration = Math.max(0, asNumber(durationMs));
+  return duration > 0 ? Math.min(position, duration) : position;
+}
+
 function formatTime(ms) {
   const seconds = Math.max(0, Math.floor(asNumber(ms) / 1000));
   const minutes = Math.floor(seconds / 60);
@@ -48,7 +55,7 @@ function normalize(payload) {
   const playback = payload.playback || {};
 
   return {
-    revision: asNumber(payload.server_revision ?? payload.revision),
+    revision: asNumber(payload.revision ?? payload.server_revision),
     updatedAt: payload.updated_at || '',
     track: {
       id: current.id || payload.track_id || '',
@@ -77,9 +84,28 @@ function playbackKey(next) {
   ].join('|');
 }
 
+function correctedPlaybackPosition(next) {
+  const durationMs = next.playback.durationMs || next.track.durationMs;
+  let positionMs = next.playback.positionMs;
+
+  if (next.playback.status === 'playing' && next.playback.updatedAt) {
+    const updatedAtMs = Date.parse(next.playback.updatedAt);
+    const elapsedMs = Date.now() - updatedAtMs;
+    const maxAgeMs = durationMs > 0
+      ? durationMs + 60_000
+      : MAX_UNBOUNDED_TIMESTAMP_AGE_MS;
+
+    if (Number.isFinite(updatedAtMs) && elapsedMs >= 0 && elapsedMs <= maxAgeMs) {
+      positionMs += elapsedMs;
+    }
+  }
+
+  return clampPosition(positionMs, durationMs);
+}
+
 function applyPlaybackAnchor(next) {
   playbackAnchor = {
-    positionMs: next.playback.positionMs,
+    positionMs: correctedPlaybackPosition(next),
     durationMs: next.playback.durationMs || next.track.durationMs,
     status: next.playback.status,
     receivedAt: performance.now()
@@ -91,7 +117,7 @@ function currentPosition() {
   if (playbackAnchor.status === 'playing') {
     position += performance.now() - playbackAnchor.receivedAt;
   }
-  return Math.max(0, Math.min(playbackAnchor.durationMs || position, position));
+  return clampPosition(position, playbackAnchor.durationMs);
 }
 
 function setCover(track) {
