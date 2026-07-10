@@ -149,7 +149,7 @@ function renderVisuals() {
 
   let rotation;
   if (state.playback.status === 'playing' || state.playback.status === 'paused') {
-    rotation = 14.5 + progress * 8.5;
+    rotation = 14 + progress * 7.5;
   } else {
     rotation = 0;
   }
