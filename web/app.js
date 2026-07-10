@@ -35,6 +35,8 @@ const STATUS_LABELS = {
 const POLL_INTERVAL_MS = 5000;
 const SSE_STALE_MS = 35000;
 const CLOCK_INTERVAL_MS = 1000;
+const VISUAL_FRAME_MS = 100;
+const EFFECTS_STORAGE_KEY = 'vinyl-panel-effects';
 
 let state = null;
 let playbackAnchor = {
@@ -49,12 +51,38 @@ let watchdogTimer = null;
 let clockTimer = null;
 let reconnectTimer = null;
 let visualFrameId = null;
+let lastVisualFrameAt = 0;
 let lastSseMessageAt = 0;
 let lastRenderedRevision = -1;
 let lastTrackId = '';
 let lastCoverSrc = '';
 let lastProgressScale = -1;
 let lastArmRotation = Number.NaN;
+
+function configureEffectsMode() {
+  const queryMode = new URLSearchParams(window.location.search).get('effects');
+  let mode = queryMode;
+
+  if (mode === 'full' || mode === 'lite') {
+    try {
+      window.localStorage.setItem(EFFECTS_STORAGE_KEY, mode);
+    } catch (_) {
+      // Storage can be disabled in kiosk/private modes.
+    }
+  } else {
+    try {
+      mode = window.localStorage.getItem(EFFECTS_STORAGE_KEY) || 'lite';
+    } catch (_) {
+      mode = 'lite';
+    }
+  }
+
+  const full = mode === 'full';
+  document.documentElement.classList.toggle('effects-full', full);
+  document.documentElement.classList.toggle('effects-lite', !full);
+}
+
+configureEffectsMode();
 
 function number(value, fallback = 0) {
   const parsed = Number(value);
@@ -231,13 +259,23 @@ function renderVisuals() {
   }
 }
 
-function visualLoop() {
-  renderVisuals();
+function visualLoop(timestamp) {
+  if (!state || state.playback.status !== 'playing' || document.hidden) {
+    visualFrameId = null;
+    return;
+  }
+
+  if (timestamp - lastVisualFrameAt >= VISUAL_FRAME_MS) {
+    renderVisuals();
+    lastVisualFrameAt = timestamp;
+  }
+
   visualFrameId = window.requestAnimationFrame(visualLoop);
 }
 
 function startVisualLoop() {
-  if (visualFrameId !== null) return;
+  if (visualFrameId !== null || !state || state.playback.status !== 'playing' || document.hidden) return;
+  lastVisualFrameAt = 0;
   visualFrameId = window.requestAnimationFrame(visualLoop);
 }
 
@@ -245,6 +283,14 @@ function stopVisualLoop() {
   if (visualFrameId === null) return;
   window.cancelAnimationFrame(visualFrameId);
   visualFrameId = null;
+}
+
+function syncVisualLoop() {
+  if (state?.playback.status === 'playing' && !document.hidden) {
+    startVisualLoop();
+  } else {
+    stopVisualLoop();
+  }
 }
 
 function renderClock() {
@@ -267,11 +313,12 @@ function applyState(payload, force = false) {
   renderVisuals();
   renderClock();
   preloadPendingCover(next);
+  syncVisualLoop();
 
   if (next.current_track.id !== lastTrackId) {
     lastTrackId = next.current_track.id;
     document.body.classList.add('track-changing');
-    window.setTimeout(() => document.body.classList.remove('track-changing'), 350);
+    window.setTimeout(() => document.body.classList.remove('track-changing'), 220);
   }
 }
 
@@ -358,7 +405,6 @@ function connectEvents() {
 }
 
 function startTimers() {
-  startVisualLoop();
   clockTimer = window.setInterval(renderClock, CLOCK_INTERVAL_MS);
   watchdogTimer = window.setInterval(() => {
     if (eventSource?.readyState === EventSource.OPEN && Date.now() - lastSseMessageAt > SSE_STALE_MS) {
@@ -376,9 +422,9 @@ function handleVisibilityChange() {
     stopVisualLoop();
     return;
   }
-  startVisualLoop();
   fetchState(true);
   connectEvents();
+  syncVisualLoop();
 }
 
 ui.spotify.addEventListener('click', (event) => {
@@ -392,6 +438,7 @@ window.addEventListener('online', () => {
 });
 window.addEventListener('offline', () => {
   closeEvents();
+  stopVisualLoop();
   setConnection('offline', 'Brak sieci');
 });
 

@@ -1,4 +1,4 @@
-/* Performance-focused overrides for the rotating vinyl layer. */
+/* Performance-focused overrides for the rotating vinyl layer and low-power browsers. */
 
 .record {
   overflow: hidden;
@@ -53,23 +53,83 @@
   backface-visibility: hidden;
 }
 
-/* Avoid layout and global style recalculation while playback advances. */
 .progress-fill,
 .progress-glow {
   width: 100%;
   transform: scaleX(0);
   transform-origin: left center;
-  transition: none;
+  transition: transform .12s linear;
   will-change: transform;
 }
 
 .arm {
-  transition: none;
+  transition: transform .12s linear;
 }
 
-/* The old animation targeted the whole record and forced a larger repaint. */
 .record.spin {
   animation: none !important;
+}
+
+/* Lite mode is the default. It removes expensive full-page effects that can
+   trigger large repaints on integrated and ARM-class GPUs. */
+.effects-lite body {
+  background: linear-gradient(135deg, #080a10, #10131b);
+}
+
+.effects-lite .app-shell {
+  background: #12151e;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 0 18px 44px rgba(0,0,0,.34);
+}
+
+.effects-lite .turntable-panel {
+  background: #141821;
+}
+
+.effects-lite .turntable-box {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    inset 0 -5px 12px rgba(0,0,0,.18),
+    0 12px 28px rgba(0,0,0,.24);
+}
+
+.effects-lite .deck {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.04),
+    inset 0 -10px 16px rgba(0,0,0,.16);
+}
+
+.effects-lite .platter,
+.effects-lite .record,
+.effects-lite .arm,
+.effects-lite .knob {
+  box-shadow: none;
+}
+
+.effects-lite .record::before,
+.effects-lite .record-rotor::before {
+  box-shadow:
+    0 0 0 26px rgba(255,255,255,.012),
+    0 0 0 56px rgba(255,255,255,.008);
+}
+
+.effects-lite .progress-glow {
+  display: none;
+}
+
+.effects-lite .chip.connection::before {
+  box-shadow: none;
+}
+
+.effects-lite .button.primary {
+  box-shadow: none;
+}
+
+.effects-lite .debug-card,
+.effects-lite .mini-card,
+.effects-lite .codebox {
+  background: rgba(255,255,255,.025);
 }
 
 @keyframes spinRotor {
