@@ -43,7 +43,9 @@ jobs:
         run: |
           test -f web/index.html
           test -f web/styles.css
+          test -f web/vinyl-performance.css
           test -f web/app.js
+          grep -q 'vinyl-performance.css' web/index.html
 
       - name: Verify no network calls remain in event hook
         run: |
