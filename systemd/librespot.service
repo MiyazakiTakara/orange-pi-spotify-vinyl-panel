@@ -4,11 +4,13 @@ After=network-online.target sound.target
 Wants=network-online.target
 
 [Service]
+Type=simple
 User=mopidy
 Group=audio
 EnvironmentFile=-/etc/default/spotify-panel
-# Make sure the event hook can write runtime files even after manual cleanup.
+Environment=SPOTIFY_PANEL_PYTHONPATH=/opt/spotify-panel/src
 ExecStartPre=+/usr/bin/install -d -o mopidy -g audio -m 775 /opt/spotify-panel
+ExecStartPre=+/usr/bin/install -d -o mopidy -g audio -m 775 /opt/spotify-panel/covers
 ExecStartPre=+/usr/bin/install -d -o mopidy -g audio -m 775 /var/cache/librespot
 ExecStart=/usr/local/bin/librespot \
   --name "${LIBRESPOT_NAME}" \
@@ -19,8 +21,14 @@ ExecStart=/usr/local/bin/librespot \
   --cache "${LIBRESPOT_CACHE}" \
   --disable-audio-cache \
   --onevent /usr/local/bin/spotify-event.sh
-Restart=always
-RestartSec=10
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/spotify-panel /var/cache/librespot
 
 [Install]
 WantedBy=multi-user.target
