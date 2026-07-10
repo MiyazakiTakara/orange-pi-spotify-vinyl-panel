@@ -149,12 +149,12 @@ function renderVisuals() {
 
   let rotation;
   if (state.playback.status === 'playing' || state.playback.status === 'paused') {
-    rotation = 18 + progress * 14;
+    rotation = 18 + progress * 12;
   } else {
-    rotation = 14;
+    rotation = 4;
   }
 
-  ui.tonearm.style.transform = `rotate(${rotation.toFixed(3)}deg)`;
+  ui.tonearm.setAttribute('transform', `rotate(${rotation.toFixed(3)} 278 42)`);
 }
 
 function renderClock() {
