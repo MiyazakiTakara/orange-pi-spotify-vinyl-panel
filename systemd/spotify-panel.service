@@ -4,13 +4,23 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+Type=simple
 User=mopidy
 Group=audio
 EnvironmentFile=-/etc/default/spotify-panel
+Environment=PYTHONPATH=/opt/spotify-panel/src
 WorkingDirectory=/opt/spotify-panel
+ExecStartPre=+/usr/bin/install -d -o mopidy -g audio -m 775 /opt/spotify-panel
+ExecStartPre=+/usr/bin/install -d -o mopidy -g audio -m 775 /opt/spotify-panel/covers
 ExecStart=/usr/bin/python3 -m vinyl_panel.server
-Restart=always
-RestartSec=5
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/spotify-panel
 
 [Install]
 WantedBy=multi-user.target
