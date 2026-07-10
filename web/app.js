@@ -19,6 +19,8 @@ const ui = {
   error: $('errorBox'),
   timeBadge: $('timeBadge'),
   progressTime: $('progressTime'),
+  progressFill: $('progressFill'),
+  progressGlow: $('progressGlow'),
   tonearm: $('tonearm')
 };
 
@@ -32,7 +34,6 @@ const STATUS_LABELS = {
 
 const POLL_INTERVAL_MS = 5000;
 const SSE_STALE_MS = 35000;
-const VISUAL_INTERVAL_MS = 100;
 const CLOCK_INTERVAL_MS = 1000;
 
 let state = null;
@@ -45,13 +46,15 @@ let playbackAnchor = {
 let eventSource = null;
 let pollingTimer = null;
 let watchdogTimer = null;
-let visualTimer = null;
 let clockTimer = null;
 let reconnectTimer = null;
+let visualFrameId = null;
 let lastSseMessageAt = 0;
 let lastRenderedRevision = -1;
 let lastTrackId = '';
 let lastCoverSrc = '';
+let lastProgressScale = -1;
+let lastArmRotation = Number.NaN;
 
 function number(value, fallback = 0) {
   const parsed = Number(value);
@@ -207,6 +210,7 @@ function renderStatic(payload) {
 
 function renderVisuals() {
   if (!state) return;
+
   const duration = playbackAnchor.durationMs;
   const position = currentPosition();
   const progress = duration > 0 ? Math.min(1, position / duration) : 0;
@@ -214,8 +218,33 @@ function renderVisuals() {
     ? 12 + progress * 24
     : 32;
 
-  document.documentElement.style.setProperty('--progress', `${(progress * 100).toFixed(3)}%`);
-  document.documentElement.style.setProperty('--arm-rotation', `${armRotation.toFixed(3)}deg`);
+  if (Math.abs(progress - lastProgressScale) > 0.00001) {
+    const scale = `scaleX(${progress.toFixed(6)})`;
+    ui.progressFill.style.transform = scale;
+    ui.progressGlow.style.transform = scale;
+    lastProgressScale = progress;
+  }
+
+  if (!Number.isFinite(lastArmRotation) || Math.abs(armRotation - lastArmRotation) > 0.001) {
+    ui.tonearm.style.transform = `rotate(${armRotation.toFixed(3)}deg)`;
+    lastArmRotation = armRotation;
+  }
+}
+
+function visualLoop() {
+  renderVisuals();
+  visualFrameId = window.requestAnimationFrame(visualLoop);
+}
+
+function startVisualLoop() {
+  if (visualFrameId !== null) return;
+  visualFrameId = window.requestAnimationFrame(visualLoop);
+}
+
+function stopVisualLoop() {
+  if (visualFrameId === null) return;
+  window.cancelAnimationFrame(visualFrameId);
+  visualFrameId = null;
 }
 
 function renderClock() {
@@ -329,7 +358,7 @@ function connectEvents() {
 }
 
 function startTimers() {
-  visualTimer = window.setInterval(renderVisuals, VISUAL_INTERVAL_MS);
+  startVisualLoop();
   clockTimer = window.setInterval(renderClock, CLOCK_INTERVAL_MS);
   watchdogTimer = window.setInterval(() => {
     if (eventSource?.readyState === EventSource.OPEN && Date.now() - lastSseMessageAt > SSE_STALE_MS) {
@@ -344,8 +373,10 @@ function handleVisibilityChange() {
   if (document.hidden) {
     closeEvents();
     stopPolling();
+    stopVisualLoop();
     return;
   }
+  startVisualLoop();
   fetchState(true);
   connectEvents();
 }

@@ -1,0 +1,84 @@
+/* Performance-focused overrides for the rotating vinyl layer. */
+
+.record {
+  overflow: hidden;
+  isolation: isolate;
+  transform: none;
+  contain: layout paint;
+}
+
+.record-rotor {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transform: translate3d(0, 0, 0);
+  transform-origin: 50% 50%;
+  backface-visibility: hidden;
+  will-change: transform;
+  contain: strict;
+}
+
+.record-rotor::before {
+  position: absolute;
+  inset: 11%;
+  border: 1px solid rgba(255,255,255,.045);
+  border-radius: 50%;
+  content: "";
+  pointer-events: none;
+  box-shadow:
+    0 0 0 24px rgba(255,255,255,.014),
+    0 0 0 50px rgba(255,255,255,.010),
+    0 0 0 82px rgba(255,255,255,.007);
+}
+
+.record-rotor.spin {
+  animation: spinRotor 3.2s linear infinite;
+  animation-play-state: paused;
+}
+
+.playing .record-rotor.spin {
+  animation-play-state: running;
+}
+
+.label-cover {
+  transform: translate3d(-50%, -50%, 0);
+  backface-visibility: hidden;
+  will-change: transform;
+  box-shadow: 0 0 0 8px rgba(0,0,0,.34);
+}
+
+.label-cover img,
+.no-cover {
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+}
+
+/* Avoid layout and global style recalculation while playback advances. */
+.progress-fill,
+.progress-glow {
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: none;
+  will-change: transform;
+}
+
+.arm {
+  transition: none;
+}
+
+/* The old animation targeted the whole record and forced a larger repaint. */
+.record.spin {
+  animation: none !important;
+}
+
+@keyframes spinRotor {
+  from { transform: translate3d(0, 0, 0) rotate(0deg); }
+  to { transform: translate3d(0, 0, 0) rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .record-rotor.spin {
+    animation: none !important;
+  }
+}
