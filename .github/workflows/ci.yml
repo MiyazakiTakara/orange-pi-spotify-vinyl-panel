@@ -44,8 +44,8 @@ jobs:
           test -f web/index.html
           test -f web/player.css
           test -f web/app.js
-          grep -q 'player.css?v=12' web/index.html
-          grep -q 'app.js?v=12' web/index.html
+          grep -q 'player.css?v=13' web/index.html
+          grep -q 'app.js?v=13' web/index.html
           ! grep -q 'styles.css\|vinyl-performance.css' web/index.html
 
       - name: Verify no network calls remain in event hook
