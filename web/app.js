@@ -1,312 +1,369 @@
-let sourceState = null;
-let displayState = null;
-let pendingState = null;
-let pendingSince = 0;
-let latestFetchAt = Date.now();
-let lastServerStateVersion = '';
-let lastRealtimeAt = 0;
-let eventsConnected = false;
-let lastRenderedTrackKey = '';
-let cleanedLegacyRotation = false;
-
 const $ = (id) => document.getElementById(id);
-const TRACK_SWITCH_GUARD_MS = 2500;
-const FALLBACK_PENDING_DELAY_MS = 1800;
-const POLL_INTERVAL_MS = 2000;
-const REALTIME_STALE_MS = 7000;
 
-function parseNum(value) {
-  if (value === null || value === undefined || value === '') return 0;
+const ui = {
+  title: $('title'),
+  artist: $('artist'),
+  progressTitle: $('progressTitle'),
+  progressArtist: $('progressArtist'),
+  trackId: $('trackIdBox'),
+  spotify: $('spotifyBtn'),
+  updatedAt: $('updatedAt'),
+  miniStatus: $('miniStatus'),
+  client: $('clientValue'),
+  shuffle: $('shuffleValue'),
+  repeat: $('repeatValue'),
+  statusBadge: $('statusBadge'),
+  connectionBadge: $('connectionBadge'),
+  vinylStage: $('vinylStage'),
+  cover: $('coverHolder'),
+  error: $('errorBox'),
+  timeBadge: $('timeBadge'),
+  progressTime: $('progressTime'),
+  tonearm: $('tonearm')
+};
+
+const STATUS_LABELS = {
+  playing: 'Gra teraz',
+  paused: 'Pauza',
+  stopped: 'Stop',
+  waiting: 'Czekam na Spotify',
+  error: 'Błąd'
+};
+
+const POLL_INTERVAL_MS = 5000;
+const SSE_STALE_MS = 35000;
+const VISUAL_INTERVAL_MS = 100;
+const CLOCK_INTERVAL_MS = 1000;
+
+let state = null;
+let playbackAnchor = {
+  positionMs: 0,
+  receivedAt: performance.now(),
+  status: 'waiting',
+  durationMs: 0
+};
+let eventSource = null;
+let pollingTimer = null;
+let watchdogTimer = null;
+let visualTimer = null;
+let clockTimer = null;
+let reconnectTimer = null;
+let lastSseMessageAt = 0;
+let lastRenderedRevision = -1;
+let lastTrackId = '';
+let lastCoverSrc = '';
+
+function number(value, fallback = 0) {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function normalizeStatus(raw, title, trackId) {
-  const value = String(raw || '').toLowerCase();
-  if (['playing', 'paused', 'stopped', 'waiting', 'error'].includes(value)) return value;
-  if (['seeked', 'changed', 'metadata', 'track_changed', 'volume_set'].includes(value) && (title || trackId)) return 'playing';
-  if ((value === 'unavailable' || value === 'unknown') && (title || trackId)) return 'playing';
-  if (!title && !trackId) return 'waiting';
-  return value || 'waiting';
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function statusLabel(status) {
-  return {
-    playing: 'Gra teraz',
-    paused: 'Pauza',
-    stopped: 'Stop',
-    waiting: 'Czekam na Spotify',
-    error: 'Błąd'
-  }[status] || status;
+  return STATUS_LABELS[status] || status || 'Czekam';
 }
 
 function formatTime(ms) {
-  const safeMs = Math.max(0, parseNum(ms));
-  const totalSec = Math.floor(safeMs / 1000);
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  const seconds = Math.max(0, Math.floor(number(ms) / 1000));
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-function computePosition(data, status) {
-  const base = parseNum(data.position_ms);
-  const duration = parseNum(data.duration_ms);
-  if (duration <= 0) return { position: base, duration };
+function normalizedState(payload) {
+  const current = payload.current_track || {};
+  const playback = payload.playback || {};
+  const controls = payload.controls || {};
+  const session = payload.session || {};
 
-  let position = base;
-  if (status === 'playing') {
-    const playbackUpdatedAt = Date.parse(data.playback_updated_at || data.updated_at || '');
-    position += Number.isNaN(playbackUpdatedAt) ? Date.now() - latestFetchAt : Date.now() - playbackUpdatedAt;
-  }
-
-  return { position: Math.max(0, Math.min(duration, position)), duration };
+  return {
+    ...payload,
+    current_track: {
+      id: current.id || payload.track_id || '',
+      spotify_url: current.spotify_url || payload.spotify_url || '',
+      name: current.name || payload.title || '',
+      artist_text: current.artist_text || payload.author || '',
+      album: current.album || '',
+      duration_ms: number(current.duration_ms || payload.duration_ms),
+      cover_url: current.cover_url || payload.thumbnail_url || '',
+      cover_local_url: current.cover_local_url || payload.local_thumbnail_url || ''
+    },
+    pending_track: payload.pending_track || {},
+    playback: {
+      status: playback.status || payload.event || 'waiting',
+      position_ms: number(playback.position_ms ?? payload.position_ms),
+      duration_ms: number(playback.duration_ms || current.duration_ms || payload.duration_ms),
+      updated_at: playback.updated_at || payload.playback_updated_at || payload.updated_at || ''
+    },
+    controls: {
+      volume: controls.volume ?? payload.volume ?? '',
+      shuffle: controls.shuffle ?? payload.shuffle ?? '',
+      repeat: controls.repeat ?? payload.repeat ?? '',
+      repeat_track: controls.repeat_track ?? ''
+    },
+    session
+  };
 }
 
-function stateVersion(data) {
-  return [
-    data.track_id || '',
-    data.event || '',
-    data.raw_event || '',
-    data.position_ms || '',
-    data.duration_ms || '',
-    data.state_updated_at || data.updated_at || '',
-    data.playback_updated_at || '',
-    data.metadata_updated_at || '',
-    data.local_thumbnail_url || data.thumbnail_url || ''
-  ].join('|');
+function setConnection(mode, text) {
+  ui.connectionBadge.className = `chip connection ${mode}`;
+  ui.connectionBadge.textContent = text;
 }
 
-function remainingMs(data) {
-  const status = normalizeStatus(data.event, data.title, data.track_id);
-  const { position, duration } = computePosition(data, status);
-  if (duration <= 0) return 0;
-  return Math.max(0, duration - position);
+function showError(message = '') {
+  ui.error.textContent = message;
+  ui.error.style.display = message ? 'block' : 'none';
 }
 
-function shouldDelayTrackSwitch(nextState) {
-  if (!displayState || !nextState) return false;
-  if (!displayState.track_id || !nextState.track_id) return false;
-  if (displayState.track_id === nextState.track_id) return false;
-
-  const oldStatus = normalizeStatus(displayState.event, displayState.title, displayState.track_id);
-  if (oldStatus !== 'playing' && oldStatus !== 'paused') return false;
-
-  const oldDuration = parseNum(displayState.duration_ms);
-  if (oldDuration <= 0) {
-    return Date.now() - pendingSince < FALLBACK_PENDING_DELAY_MS;
-  }
-
-  return remainingMs(displayState) > TRACK_SWITCH_GUARD_MS;
+function displayValue(value) {
+  return value === '' || value === null || value === undefined ? '—' : String(value);
 }
 
-function chooseDisplayState(nextState) {
-  sourceState = nextState;
+function setCover(track) {
+  const src = track.cover_local_url || track.cover_url || '';
+  if (src === lastCoverSrc) return;
+  lastCoverSrc = src;
 
-  if (!displayState) {
-    displayState = nextState;
-    pendingState = null;
-    pendingSince = 0;
-    return displayState;
-  }
-
-  if (displayState.track_id !== nextState.track_id && shouldDelayTrackSwitch(nextState)) {
-    pendingState = nextState;
-    if (!pendingSince) pendingSince = Date.now();
-    return displayState;
-  }
-
-  displayState = nextState;
-  pendingState = null;
-  pendingSince = 0;
-  return displayState;
-}
-
-function maybeCommitPending() {
-  if (!pendingState || !displayState) return;
-
-  const duration = parseNum(displayState.duration_ms);
-  const elapsedPending = Date.now() - pendingSince;
-
-  if (duration <= 0 && elapsedPending >= FALLBACK_PENDING_DELAY_MS) {
-    displayState = pendingState;
-    pendingState = null;
-    pendingSince = 0;
-    renderStatic(displayState);
+  if (!src) {
+    ui.cover.replaceChildren(Object.assign(document.createElement('div'), {
+      className: 'no-cover',
+      textContent: '♪'
+    }));
     return;
   }
 
-  if (remainingMs(displayState) <= TRACK_SWITCH_GUARD_MS) {
-    displayState = pendingState;
-    pendingState = null;
-    pendingSince = 0;
-    renderStatic(displayState);
+  const image = new Image();
+  image.alt = 'Okładka';
+  image.decoding = 'async';
+  image.referrerPolicy = 'no-referrer';
+  image.addEventListener('load', () => {
+    if (src !== lastCoverSrc) return;
+    ui.cover.replaceChildren(image);
+  }, { once: true });
+  image.addEventListener('error', () => {
+    if (track.cover_url && src !== track.cover_url) {
+      lastCoverSrc = '';
+      setCover({ ...track, cover_local_url: '' });
+    }
+  }, { once: true });
+  image.src = src;
+}
+
+function preloadPendingCover(payload) {
+  const pending = payload.pending_track || {};
+  const src = pending.cover_local_url || pending.cover_url;
+  if (src) {
+    const image = new Image();
+    image.decoding = 'async';
+    image.src = src;
   }
 }
 
-function setCover(src) {
-  const holder = $('coverHolder');
-  const current = holder.dataset.currentSrc || '';
-  if (src && current !== src) {
-    holder.innerHTML = `<img src="${src}" alt="Okładka" referrerpolicy="no-referrer">`;
-    holder.dataset.currentSrc = src;
-  } else if (!src && current !== '__empty__') {
-    holder.innerHTML = '<div class="no-cover">♪</div>';
-    holder.dataset.currentSrc = '__empty__';
+function applyPlaybackAnchor(payload) {
+  playbackAnchor = {
+    positionMs: number(payload.playback.position_ms),
+    durationMs: number(payload.playback.duration_ms || payload.current_track.duration_ms),
+    status: payload.playback.status,
+    receivedAt: performance.now()
+  };
+}
+
+function currentPosition() {
+  let position = playbackAnchor.positionMs;
+  if (playbackAnchor.status === 'playing') {
+    position += performance.now() - playbackAnchor.receivedAt;
+  }
+  return Math.max(0, Math.min(playbackAnchor.durationMs || position, position));
+}
+
+function renderStatic(payload) {
+  const track = payload.current_track;
+  const playback = payload.playback;
+  const status = playback.status;
+  const title = track.name || 'Czekam na utwór...';
+  const artist = track.artist_text || 'Spotify Connect';
+  const spotifyUrl = track.spotify_url || (track.id ? `https://open.spotify.com/track/${track.id}` : '');
+
+  document.title = track.name ? `${track.name} — ${artist}` : 'Orange Pi Audio';
+  ui.title.textContent = title;
+  ui.artist.textContent = artist;
+  ui.progressTitle.textContent = title;
+  ui.progressArtist.textContent = artist;
+  ui.trackId.textContent = track.id || '—';
+  ui.updatedAt.textContent = `Aktualizacja: ${payload.updated_at || 'Brak danych'}`;
+  ui.miniStatus.textContent = statusLabel(status);
+  ui.client.textContent = payload.session.client_name || payload.session.user_name || '—';
+  ui.shuffle.textContent = displayValue(payload.controls.shuffle);
+  ui.repeat.textContent = displayValue(payload.controls.repeat_track || payload.controls.repeat);
+
+  ui.statusBadge.textContent = statusLabel(status);
+  ui.statusBadge.className = `chip status ${status}`;
+  ui.vinylStage.className = `vinyl-stage ${status}`;
+
+  ui.spotify.href = spotifyUrl || '#';
+  ui.spotify.classList.toggle('disabled', !spotifyUrl);
+  ui.spotify.setAttribute('aria-disabled', spotifyUrl ? 'false' : 'true');
+
+  setCover(track);
+  showError(payload.last_error || '');
+}
+
+function renderVisuals() {
+  if (!state) return;
+  const duration = playbackAnchor.durationMs;
+  const position = currentPosition();
+  const progress = duration > 0 ? Math.min(1, position / duration) : 0;
+  const armRotation = state.playback.status === 'playing' || state.playback.status === 'paused'
+    ? 12 + progress * 24
+    : 32;
+
+  document.documentElement.style.setProperty('--progress', `${(progress * 100).toFixed(3)}%`);
+  document.documentElement.style.setProperty('--arm-rotation', `${armRotation.toFixed(3)}deg`);
+}
+
+function renderClock() {
+  const position = currentPosition();
+  const duration = playbackAnchor.durationMs;
+  const value = `${formatTime(position)} / ${formatTime(duration)}`;
+  ui.timeBadge.textContent = value;
+  ui.progressTime.textContent = value;
+}
+
+function applyState(payload, force = false) {
+  const next = normalizedState(payload);
+  const revision = number(next.server_revision ?? next.revision, 0);
+  if (!force && revision && revision <= lastRenderedRevision) return;
+
+  state = next;
+  if (revision) lastRenderedRevision = revision;
+  applyPlaybackAnchor(next);
+  renderStatic(next);
+  renderVisuals();
+  renderClock();
+  preloadPendingCover(next);
+
+  if (next.current_track.id !== lastTrackId) {
+    lastTrackId = next.current_track.id;
+    document.body.classList.add('track-changing');
+    window.setTimeout(() => document.body.classList.remove('track-changing'), 350);
   }
 }
 
-function clearOldManualRotationOnce() {
-  if (cleanedLegacyRotation) return;
-  cleanedLegacyRotation = true;
-  const record = document.querySelector('.record.spin');
-  const cover = document.querySelector('.label-cover.spin');
-  if (record) {
-    record.style.animation = '';
-    record.style.transform = '';
-  }
-  if (cover) {
-    cover.style.animation = '';
-    cover.style.transform = '';
-  }
-}
-
-function renderStatic(data) {
-  const title = data.title || 'Czekam na utwór...';
-  const author = data.author || 'Spotify Connect';
-  const trackId = data.track_id || '—';
-  const status = normalizeStatus(data.event, data.title, data.track_id);
-  const thumb = data.local_thumbnail_url || data.thumbnail_url || '';
-  const error = data.oembed_error || data.error || '';
-  const trackKey = `${trackId}|${title}|${author}|${thumb}|${status}`;
-
-  if (trackKey === lastRenderedTrackKey) {
-    $('updatedAt').textContent = `Aktualizacja: ${data.state_updated_at || data.updated_at || 'Brak danych'}`;
-    $('miniStatus').textContent = statusLabel(status);
-    return;
-  }
-
-  lastRenderedTrackKey = trackKey;
-  clearOldManualRotationOnce();
-
-  $('title').textContent = title;
-  $('artist').textContent = author;
-  $('progressTitle').textContent = title;
-  $('progressArtist').textContent = author;
-  $('trackIdBox').textContent = trackId;
-  $('spotifyBtn').href = data.spotify_url || '#';
-  $('updatedAt').textContent = `Aktualizacja: ${data.state_updated_at || data.updated_at || 'Brak danych'}`;
-  $('miniStatus').textContent = statusLabel(status);
-  $('shuffleValue').textContent = data.shuffle === '' || data.shuffle === undefined ? '—' : String(data.shuffle);
-  $('repeatValue').textContent = data.repeat === '' || data.repeat === undefined ? '—' : String(data.repeat);
-
-  const badge = $('statusBadge');
-  badge.textContent = statusLabel(status);
-  badge.className = `chip status ${status}`;
-  $('vinylStage').className = `vinyl-stage ${status}`;
-  setCover(thumb);
-
-  const errorBox = $('errorBox');
-  if (error) {
-    errorBox.style.display = 'block';
-    errorBox.textContent = error;
-  } else {
-    errorBox.style.display = 'none';
-    errorBox.textContent = '';
-  }
-}
-
-function renderDynamic(data) {
-  const status = normalizeStatus(data.event, data.title, data.track_id);
-  const { position, duration } = computePosition(data, status);
-  const progress = duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
-
-  document.documentElement.style.setProperty('--progress', `${(progress * 100).toFixed(2)}%`);
-  $('timeBadge').textContent = `${formatTime(position)} / ${formatTime(duration)}`;
-  $('progressTime').textContent = `${formatTime(position)} / ${formatTime(duration)}`;
-
-  const tonearm = $('tonearm');
-  let armRotation = 32;
-
-  if (status === 'playing' || status === 'paused') {
-    armRotation = 12 + progress * 24;
-  }
-
-  document.documentElement.style.setProperty('--arm-rotation', `${armRotation.toFixed(2)}deg`);
-  if (tonearm) {
-    tonearm.style.transform = `rotate(${armRotation.toFixed(2)}deg)`;
-  }
-}
-
-function applyState(data, force = false) {
-  const version = stateVersion(data);
-  latestFetchAt = Date.now();
-
-  if (!force && version === lastServerStateVersion && displayState) {
-    return;
-  }
-
-  lastServerStateVersion = version;
-  const chosen = chooseDisplayState(data);
-  renderStatic(chosen);
-  renderDynamic(chosen);
-}
-
-async function loadState(force = false) {
+async function fetchState(force = false) {
   try {
-    const response = await fetch(`/api/state?ts=${Date.now()}`, { cache: 'no-store' });
-    const data = await response.json();
-    applyState(data, force);
+    const response = await fetch('/api/state', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    applyState(await response.json(), force);
+    if (!eventSource || eventSource.readyState !== EventSource.OPEN) {
+      setConnection('polling', 'Polling');
+    }
   } catch (error) {
-    const errorBox = $('errorBox');
-    errorBox.style.display = 'block';
-    errorBox.textContent = `Nie udało się pobrać stanu panelu: ${error}`;
+    setConnection('offline', 'Rozłączono');
+    showError(`Nie udało się pobrać stanu: ${error}`);
   }
 }
 
-function startRealtimeEvents() {
-  if (!window.EventSource) return;
+function startPolling() {
+  if (pollingTimer) return;
+  fetchState(true);
+  pollingTimer = window.setInterval(() => fetchState(false), POLL_INTERVAL_MS);
+}
 
-  const events = new EventSource('/api/events');
+function stopPolling() {
+  if (!pollingTimer) return;
+  window.clearInterval(pollingTimer);
+  pollingTimer = null;
+}
 
-  events.addEventListener('open', () => {
-    eventsConnected = true;
-    lastRealtimeAt = Date.now();
+function closeEvents() {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null;
+    connectEvents();
+  }, 3000);
+}
+
+function connectEvents() {
+  if (!window.EventSource || document.hidden) {
+    startPolling();
+    return;
+  }
+
+  closeEvents();
+  setConnection('connecting', 'Łączenie...');
+  const source = new EventSource('/api/events');
+  eventSource = source;
+
+  source.addEventListener('open', () => {
+    lastSseMessageAt = Date.now();
+    setConnection('live', 'Live');
+    stopPolling();
   });
 
-  events.addEventListener('state', (event) => {
-    lastRealtimeAt = Date.now();
+  source.addEventListener('state', (event) => {
+    lastSseMessageAt = Date.now();
+    setConnection('live', 'Live');
     try {
-      applyState(JSON.parse(event.data), true);
+      applyState(JSON.parse(event.data), false);
     } catch (error) {
-      console.warn('Invalid realtime state event', error);
+      showError(`Nieprawidłowy event realtime: ${error}`);
     }
   });
 
-  events.addEventListener('ping', () => {
-    lastRealtimeAt = Date.now();
+  source.addEventListener('ping', () => {
+    lastSseMessageAt = Date.now();
+    setConnection('live', 'Live');
   });
 
-  events.addEventListener('error', () => {
-    eventsConnected = false;
+  source.addEventListener('error', () => {
+    if (eventSource !== source) return;
+    setConnection('polling', 'Polling');
+    closeEvents();
+    startPolling();
+    scheduleReconnect();
   });
 }
 
-function startReliablePolling() {
-  window.setInterval(() => {
-    const realtimeLooksStale = !eventsConnected || Date.now() - lastRealtimeAt > REALTIME_STALE_MS;
-    loadState(realtimeLooksStale);
-  }, POLL_INTERVAL_MS);
+function startTimers() {
+  visualTimer = window.setInterval(renderVisuals, VISUAL_INTERVAL_MS);
+  clockTimer = window.setInterval(renderClock, CLOCK_INTERVAL_MS);
+  watchdogTimer = window.setInterval(() => {
+    if (eventSource?.readyState === EventSource.OPEN && Date.now() - lastSseMessageAt > SSE_STALE_MS) {
+      closeEvents();
+      startPolling();
+      scheduleReconnect();
+    }
+  }, 5000);
 }
 
-function animationLoop() {
-  maybeCommitPending();
-  if (displayState) {
-    renderDynamic(displayState);
+function handleVisibilityChange() {
+  if (document.hidden) {
+    closeEvents();
+    stopPolling();
+    return;
   }
-  window.requestAnimationFrame(animationLoop);
+  fetchState(true);
+  connectEvents();
 }
 
-loadState(true);
-startRealtimeEvents();
-startReliablePolling();
-window.requestAnimationFrame(animationLoop);
+ui.spotify.addEventListener('click', (event) => {
+  if (ui.spotify.getAttribute('aria-disabled') === 'true') event.preventDefault();
+});
+
+document.addEventListener('visibilitychange', handleVisibilityChange);
+window.addEventListener('online', () => {
+  fetchState(true);
+  connectEvents();
+});
+window.addEventListener('offline', () => {
+  closeEvents();
+  setConnection('offline', 'Brak sieci');
+});
+
+fetchState(true);
+connectEvents();
+startTimers();
