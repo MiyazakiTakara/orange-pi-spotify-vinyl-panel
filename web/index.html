@@ -9,83 +9,57 @@
   <link rel="stylesheet" href="/vinyl-performance.css">
 </head>
 <body>
-  <main class="page">
+  <main class="page minimal-player">
     <section class="app-shell">
-      <aside class="info-panel">
-        <div class="eyebrow">Orange Pi Audio</div>
-        <h1 class="hero-title" id="title">Czekam na utwór...</h1>
-        <div class="hero-artist" id="artist">Spotify Connect</div>
-
-        <div class="status-row">
-          <span class="chip status waiting" id="statusBadge">Czekam na Spotify</span>
-          <span class="chip connection connecting" id="connectionBadge">Łączenie...</span>
-          <span class="chip" id="timeBadge">00:00 / 00:00</span>
-          <span class="chip" id="updatedAt">Brak danych</span>
-        </div>
-
-        <div class="actions">
-          <a class="button primary disabled" id="spotifyBtn" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">Otwórz w Spotify</a>
-          <a class="button secondary" href="/api/debug" target="_blank" rel="noopener noreferrer">Diagnostyka</a>
-        </div>
-
-        <div class="debug-card">
-          <div class="debug-label">Track ID</div>
-          <div class="codebox" id="trackIdBox">—</div>
-          <div class="mini-grid">
-            <div class="mini-card"><span>Status</span><strong id="miniStatus">Czekam</strong></div>
-            <div class="mini-card"><span>Klient</span><strong id="clientValue">—</strong></div>
-            <div class="mini-card"><span>Shuffle</span><strong id="shuffleValue">—</strong></div>
-            <div class="mini-card"><span>Repeat</span><strong id="repeatValue">—</strong></div>
-          </div>
-          <div class="error" id="errorBox"></div>
-        </div>
-      </aside>
-
       <section class="turntable-panel">
         <div class="turntable-box">
           <div class="deck">
-            <div class="deck-layout">
-              <div class="platter-area">
-                <div class="vinyl-stage waiting" id="vinylStage">
-                  <div class="platter"></div>
-                  <div class="record" id="record">
-                    <div class="record-rotor spin">
-                      <div class="label-cover" id="coverHolder"><div class="no-cover">♪</div></div>
-                    </div>
-                  </div>
-                  <div class="tonearm-area">
-                    <div class="arm-base"></div>
-                    <div class="arm" id="tonearm"><div class="stylus"></div></div>
+            <div class="platter-area">
+              <div class="vinyl-stage waiting" id="vinylStage">
+                <div class="platter"></div>
+                <div class="record" id="record">
+                  <div class="record-rotor spin">
+                    <div class="label-cover" id="coverHolder"><div class="no-cover">♪</div></div>
                   </div>
                 </div>
-              </div>
-
-              <div class="knobs">
-                <div class="knob-unit"><div class="knob knob-a"></div><span>Volume</span></div>
-                <div class="knob-unit"><div class="knob knob-b"></div><span>Tone</span></div>
-                <div class="knob-unit"><div class="knob knob-c"></div><span>Mode</span></div>
+                <div class="tonearm-area">
+                  <div class="arm-base"></div>
+                  <div class="arm" id="tonearm"><div class="stylus"></div></div>
+                </div>
               </div>
             </div>
 
-            <div class="now-playing-strip">
+            <div class="now-playing-strip minimal-meta">
               <div class="strip-text">
                 <strong id="progressTitle">Czekam na utwór...</strong>
-                <span id="progressArtist">Spotify Connect</span>
               </div>
               <div class="strip-time" id="progressTime">00:00 / 00:00</div>
             </div>
-
-            <div class="progress-shell" aria-hidden="true">
-              <div class="progress-glow" id="progressGlow"></div>
-              <div class="progress-fill" id="progressFill"></div>
-            </div>
-
-            <div class="deck-footer">Vinyl UI • Orange Pi • Spotify Connect</div>
           </div>
         </div>
       </section>
     </section>
   </main>
+
+  <div class="visually-hidden" aria-hidden="true">
+    <h1 id="title"></h1>
+    <div id="artist"></div>
+    <div id="progressArtist"></div>
+    <div id="trackIdBox"></div>
+    <a id="spotifyBtn" href="#"></a>
+    <div id="updatedAt"></div>
+    <div id="miniStatus"></div>
+    <div id="clientValue"></div>
+    <div id="shuffleValue"></div>
+    <div id="repeatValue"></div>
+    <div id="statusBadge"></div>
+    <div id="connectionBadge"></div>
+    <div id="errorBox"></div>
+    <div id="timeBadge"></div>
+    <div id="progressGlow"></div>
+    <div id="progressFill"></div>
+  </div>
+
   <script src="/app.js"></script>
 </body>
 </html>
