@@ -142,11 +142,18 @@ function renderStatic(next) {
 
 function renderVisuals() {
   if (!state) return;
+
   const duration = playbackAnchor.durationMs;
   const position = currentPosition();
   const progress = duration > 0 ? Math.min(1, position / duration) : 0;
-  const active = state.playback.status === 'playing' || state.playback.status === 'paused';
-  const rotation = active ? 12 + progress * 24 : 32;
+
+  let rotation;
+  if (state.playback.status === 'playing' || state.playback.status === 'paused') {
+    rotation = 18 + progress * 14;
+  } else {
+    rotation = 14;
+  }
+
   ui.tonearm.style.transform = `rotate(${rotation.toFixed(3)}deg)`;
 }
 
