@@ -6,8 +6,8 @@
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#080a0f">
   <title>Orange Pi Audio</title>
-  <link rel="stylesheet" href="/player.css?v=8">
-  <script src="/app.js?v=8" defer></script>
+  <link rel="stylesheet" href="/player.css?v=9">
+  <script src="/app.js?v=9" defer></script>
 </head>
 <body>
   <main class="player">
@@ -24,12 +24,33 @@
             </div>
           </div>
 
-          <div class="tonearm" aria-hidden="true">
-            <div class="tonearm-base"></div>
-            <div class="tonearm-arm" id="tonearm">
-              <div class="stylus"></div>
-            </div>
-          </div>
+          <svg class="tonearm-svg" viewBox="0 0 320 320" aria-hidden="true">
+            <defs>
+              <linearGradient id="armMetal" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#6f7785" />
+                <stop offset="0.42" stop-color="#eef1f6" />
+                <stop offset="0.7" stop-color="#b6beca" />
+                <stop offset="1" stop-color="#646c79" />
+              </linearGradient>
+              <radialGradient id="pivotMetal" cx="35%" cy="28%" r="72%">
+                <stop offset="0" stop-color="#f0f2f6" />
+                <stop offset="0.45" stop-color="#9da6b3" />
+                <stop offset="1" stop-color="#535b68" />
+              </radialGradient>
+            </defs>
+
+            <g class="tonearm-moving" id="tonearm" transform="rotate(18 278 42)">
+              <rect class="tonearm-counterweight" x="265" y="4" width="26" height="27" rx="10" />
+              <line class="tonearm-tube" x1="278" y1="24" x2="278" y2="246" />
+              <path class="tonearm-headshell" d="M267 241 H289 L293 264 Q293 270 287 270 H266 Q261 270 263 264 Z" />
+              <rect class="tonearm-cartridge" x="268" y="263" width="16" height="9" rx="2" />
+              <line class="tonearm-stylus" x1="276" y1="271" x2="270" y2="284" />
+            </g>
+
+            <circle class="tonearm-pivot-shadow" cx="278" cy="42" r="25" />
+            <circle class="tonearm-pivot-ring" cx="278" cy="42" r="22" />
+            <circle class="tonearm-pivot-core" cx="278" cy="42" r="10" />
+          </svg>
         </div>
       </div>
 
