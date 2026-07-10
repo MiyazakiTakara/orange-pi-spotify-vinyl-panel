@@ -47,8 +47,10 @@
               <div class="platter-area">
                 <div class="vinyl-stage waiting" id="vinylStage">
                   <div class="platter"></div>
-                  <div class="record spin" id="record">
-                    <div class="label-cover" id="coverHolder"><div class="no-cover">♪</div></div>
+                  <div class="record" id="record">
+                    <div class="record-rotor spin">
+                      <div class="label-cover" id="coverHolder"><div class="no-cover">♪</div></div>
+                    </div>
                   </div>
                   <div class="tonearm-area">
                     <div class="arm-base"></div>
@@ -73,8 +75,8 @@
             </div>
 
             <div class="progress-shell" aria-hidden="true">
-              <div class="progress-glow"></div>
-              <div class="progress-fill"></div>
+              <div class="progress-glow" id="progressGlow"></div>
+              <div class="progress-fill" id="progressFill"></div>
             </div>
 
             <div class="deck-footer">Vinyl UI • Orange Pi • Spotify Connect</div>
