@@ -27,7 +27,8 @@ install -d -o "$APP_USER" -g "$APP_GROUP" -m 775 \
 
 rm -rf "$PYTHON_SITE/vinyl_panel"
 cp -r src/vinyl_panel "$PYTHON_SITE/"
-cp web/index.html web/styles.css web/vinyl-performance.css web/app.js "$APP_DIR/web/"
+rm -f "$APP_DIR/web/styles.css" "$APP_DIR/web/vinyl-performance.css"
+cp web/index.html web/player.css web/app.js "$APP_DIR/web/"
 cp scripts/spotify-event.sh /usr/local/bin/spotify-event.sh
 cp systemd/spotify-panel.service /etc/systemd/system/spotify-panel.service
 cp systemd/librespot.service /etc/systemd/system/librespot.service
