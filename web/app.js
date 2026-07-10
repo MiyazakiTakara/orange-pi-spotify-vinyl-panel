@@ -1,208 +1,87 @@
-const $ = (id) => document.getElementById(id);
-
 const ui = {
-  title: $('title'),
-  artist: $('artist'),
-  progressTitle: $('progressTitle'),
-  progressArtist: $('progressArtist'),
-  trackId: $('trackIdBox'),
-  spotify: $('spotifyBtn'),
-  updatedAt: $('updatedAt'),
-  miniStatus: $('miniStatus'),
-  client: $('clientValue'),
-  shuffle: $('shuffleValue'),
-  repeat: $('repeatValue'),
-  statusBadge: $('statusBadge'),
-  connectionBadge: $('connectionBadge'),
-  vinylStage: $('vinylStage'),
-  cover: $('coverHolder'),
-  error: $('errorBox'),
-  timeBadge: $('timeBadge'),
-  progressTime: $('progressTime'),
-  progressFill: $('progressFill'),
-  progressGlow: $('progressGlow'),
-  tonearm: $('tonearm')
-};
-
-const STATUS_LABELS = {
-  playing: 'Gra teraz',
-  paused: 'Pauza',
-  stopped: 'Stop',
-  waiting: 'Czekam na Spotify',
-  error: 'Błąd'
+  stage: document.getElementById('recordRotor').closest('.platter-stage'),
+  cover: document.getElementById('coverHolder'),
+  title: document.getElementById('trackTitle'),
+  playtime: document.getElementById('playtime'),
+  tonearm: document.getElementById('tonearm'),
+  trackInfo: document.getElementById('trackInfo')
 };
 
 const POLL_INTERVAL_MS = 5000;
 const SSE_STALE_MS = 35000;
+const VISUAL_INTERVAL_MS = 100;
 const CLOCK_INTERVAL_MS = 1000;
-const VISUAL_FRAME_MS = 100;
-const EFFECTS_STORAGE_KEY = 'vinyl-panel-effects';
 
 let state = null;
 let playbackAnchor = {
   positionMs: 0,
-  receivedAt: performance.now(),
+  durationMs: 0,
   status: 'waiting',
-  durationMs: 0
+  receivedAt: performance.now()
 };
 let eventSource = null;
 let pollingTimer = null;
-let watchdogTimer = null;
-let clockTimer = null;
 let reconnectTimer = null;
-let visualFrameId = null;
-let lastVisualFrameAt = 0;
+let watchdogTimer = null;
+let visualTimer = null;
+let clockTimer = null;
 let lastSseMessageAt = 0;
-let lastRenderedRevision = -1;
+let lastRevision = -1;
 let lastPlaybackKey = '';
 let lastTrackId = '';
 let lastCoverSrc = '';
-let lastProgressScale = -1;
-let lastArmRotation = Number.NaN;
 
-function configureEffectsMode() {
-  const queryMode = new URLSearchParams(window.location.search).get('effects');
-  let mode = queryMode;
-
-  if (mode === 'full' || mode === 'lite') {
-    try {
-      window.localStorage.setItem(EFFECTS_STORAGE_KEY, mode);
-    } catch (_) {
-      // Storage can be disabled in kiosk/private modes.
-    }
-  } else {
-    try {
-      mode = window.localStorage.getItem(EFFECTS_STORAGE_KEY) || 'lite';
-    } catch (_) {
-      mode = 'lite';
-    }
-  }
-
-  const full = mode === 'full';
-  document.documentElement.classList.toggle('effects-full', full);
-  document.documentElement.classList.toggle('effects-lite', !full);
-}
-
-configureEffectsMode();
-
-function number(value, fallback = 0) {
+function asNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function statusLabel(status) {
-  return STATUS_LABELS[status] || status || 'Czekam';
-}
-
 function formatTime(ms) {
-  const seconds = Math.max(0, Math.floor(number(ms) / 1000));
-  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+  const seconds = Math.max(0, Math.floor(asNumber(ms) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
 }
 
-function normalizedState(payload) {
+function normalize(payload) {
   const current = payload.current_track || {};
   const playback = payload.playback || {};
-  const controls = payload.controls || {};
-  const session = payload.session || {};
 
   return {
-    ...payload,
-    current_track: {
+    revision: asNumber(payload.server_revision ?? payload.revision),
+    updatedAt: payload.updated_at || '',
+    track: {
       id: current.id || payload.track_id || '',
-      spotify_url: current.spotify_url || payload.spotify_url || '',
       name: current.name || payload.title || '',
-      artist_text: current.artist_text || payload.author || '',
-      album: current.album || '',
-      duration_ms: number(current.duration_ms || payload.duration_ms),
-      cover_url: current.cover_url || payload.thumbnail_url || '',
-      cover_local_url: current.cover_local_url || payload.local_thumbnail_url || ''
+      durationMs: asNumber(current.duration_ms || payload.duration_ms),
+      coverUrl: current.cover_url || payload.thumbnail_url || '',
+      coverLocalUrl: current.cover_local_url || payload.local_thumbnail_url || ''
     },
-    pending_track: payload.pending_track || {},
+    pendingTrack: payload.pending_track || {},
     playback: {
       status: playback.status || payload.event || 'waiting',
-      position_ms: number(playback.position_ms ?? payload.position_ms),
-      duration_ms: number(playback.duration_ms || current.duration_ms || payload.duration_ms),
-      updated_at: playback.updated_at || payload.playback_updated_at || ''
-    },
-    controls: {
-      volume: controls.volume ?? payload.volume ?? '',
-      shuffle: controls.shuffle ?? payload.shuffle ?? '',
-      repeat: controls.repeat ?? payload.repeat ?? '',
-      repeat_track: controls.repeat_track ?? ''
-    },
-    session
+      positionMs: asNumber(playback.position_ms ?? payload.position_ms),
+      durationMs: asNumber(playback.duration_ms || current.duration_ms || payload.duration_ms),
+      updatedAt: playback.updated_at || payload.playback_updated_at || ''
+    }
   };
 }
 
-function playbackKey(payload) {
+function playbackKey(next) {
   return [
-    payload.current_track.id,
-    payload.playback.status,
-    payload.playback.position_ms,
-    payload.playback.duration_ms,
-    payload.playback.updated_at
+    next.track.id,
+    next.playback.status,
+    next.playback.positionMs,
+    next.playback.durationMs,
+    next.playback.updatedAt
   ].join('|');
 }
 
-function setConnection(mode, text) {
-  ui.connectionBadge.className = `chip connection ${mode}`;
-  ui.connectionBadge.textContent = text;
-}
-
-function showError(message = '') {
-  ui.error.textContent = message;
-  ui.error.style.display = message ? 'block' : 'none';
-}
-
-function displayValue(value) {
-  return value === '' || value === null || value === undefined ? '—' : String(value);
-}
-
-function setCover(track) {
-  const src = track.cover_local_url || track.cover_url || '';
-  if (src === lastCoverSrc) return;
-  lastCoverSrc = src;
-
-  if (!src) {
-    ui.cover.replaceChildren(Object.assign(document.createElement('div'), {
-      className: 'no-cover',
-      textContent: '♪'
-    }));
-    return;
-  }
-
-  const image = new Image();
-  image.alt = 'Okładka';
-  image.decoding = 'async';
-  image.referrerPolicy = 'no-referrer';
-  image.addEventListener('load', () => {
-    if (src !== lastCoverSrc) return;
-    ui.cover.replaceChildren(image);
-  }, { once: true });
-  image.addEventListener('error', () => {
-    if (track.cover_url && src !== track.cover_url) {
-      lastCoverSrc = '';
-      setCover({ ...track, cover_local_url: '' });
-    }
-  }, { once: true });
-  image.src = src;
-}
-
-function preloadPendingCover(payload) {
-  const pending = payload.pending_track || {};
-  const src = pending.cover_local_url || pending.cover_url;
-  if (src) {
-    const image = new Image();
-    image.decoding = 'async';
-    image.src = src;
-  }
-}
-
-function applyPlaybackAnchor(payload) {
+function applyPlaybackAnchor(next) {
   playbackAnchor = {
-    positionMs: number(payload.playback.position_ms),
-    durationMs: number(payload.playback.duration_ms || payload.current_track.duration_ms),
-    status: payload.playback.status,
+    positionMs: next.playback.positionMs,
+    durationMs: next.playback.durationMs || next.track.durationMs,
+    status: next.playback.status,
     receivedAt: performance.now()
   };
 }
@@ -215,129 +94,96 @@ function currentPosition() {
   return Math.max(0, Math.min(playbackAnchor.durationMs || position, position));
 }
 
-function renderStatic(payload) {
-  const track = payload.current_track;
-  const playback = payload.playback;
-  const status = playback.status;
-  const title = track.name || 'Czekam na utwór...';
-  const artist = track.artist_text || 'Spotify Connect';
-  const spotifyUrl = track.spotify_url || (track.id ? `https://open.spotify.com/track/${track.id}` : '');
+function setCover(track) {
+  const src = track.coverLocalUrl || track.coverUrl || '';
+  if (src === lastCoverSrc) return;
+  lastCoverSrc = src;
 
-  document.title = track.name ? `${track.name} — ${artist}` : 'Orange Pi Audio';
+  if (!src) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'cover-placeholder';
+    placeholder.textContent = '♪';
+    ui.cover.replaceChildren(placeholder);
+    return;
+  }
+
+  const image = new Image();
+  image.alt = '';
+  image.decoding = 'async';
+  image.referrerPolicy = 'no-referrer';
+  image.addEventListener('load', () => {
+    if (src === lastCoverSrc) ui.cover.replaceChildren(image);
+  }, { once: true });
+  image.addEventListener('error', () => {
+    if (track.coverUrl && src !== track.coverUrl) {
+      lastCoverSrc = '';
+      setCover({ ...track, coverLocalUrl: '' });
+    }
+  }, { once: true });
+  image.src = src;
+}
+
+function preloadPendingCover(next) {
+  const pending = next.pendingTrack || {};
+  const src = pending.cover_local_url || pending.cover_url || '';
+  if (!src) return;
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = src;
+}
+
+function renderStatic(next) {
+  const title = next.track.name || 'Czekam na utwór...';
   ui.title.textContent = title;
-  ui.artist.textContent = artist;
-  ui.progressTitle.textContent = title;
-  ui.progressArtist.textContent = artist;
-  ui.trackId.textContent = track.id || '—';
-  ui.updatedAt.textContent = `Aktualizacja: ${payload.updated_at || 'Brak danych'}`;
-  ui.miniStatus.textContent = statusLabel(status);
-  ui.client.textContent = payload.session.client_name || payload.session.user_name || '—';
-  ui.shuffle.textContent = displayValue(payload.controls.shuffle);
-  ui.repeat.textContent = displayValue(payload.controls.repeat_track || payload.controls.repeat);
-
-  ui.statusBadge.textContent = statusLabel(status);
-  ui.statusBadge.className = `chip status ${status}`;
-  ui.vinylStage.className = `vinyl-stage ${status}`;
-
-  ui.spotify.href = spotifyUrl || '#';
-  ui.spotify.classList.toggle('disabled', !spotifyUrl);
-  ui.spotify.setAttribute('aria-disabled', spotifyUrl ? 'false' : 'true');
-
-  setCover(track);
-  showError(payload.last_error || '');
+  document.title = next.track.name ? `${title} — Orange Pi Audio` : 'Orange Pi Audio';
+  ui.stage.classList.toggle('playing', next.playback.status === 'playing');
+  setCover(next.track);
 }
 
 function renderVisuals() {
   if (!state) return;
-
   const duration = playbackAnchor.durationMs;
   const position = currentPosition();
   const progress = duration > 0 ? Math.min(1, position / duration) : 0;
-  const armRotation = state.playback.status === 'playing' || state.playback.status === 'paused'
-    ? 12 + progress * 24
-    : 32;
-
-  if (Math.abs(progress - lastProgressScale) > 0.00001) {
-    const scale = `scaleX(${progress.toFixed(6)})`;
-    ui.progressFill.style.transform = scale;
-    ui.progressGlow.style.transform = scale;
-    lastProgressScale = progress;
-  }
-
-  if (!Number.isFinite(lastArmRotation) || Math.abs(armRotation - lastArmRotation) > 0.001) {
-    ui.tonearm.style.transform = `rotate(${armRotation.toFixed(3)}deg)`;
-    lastArmRotation = armRotation;
-  }
-}
-
-function visualLoop(timestamp) {
-  if (!state || state.playback.status !== 'playing' || document.hidden) {
-    visualFrameId = null;
-    return;
-  }
-
-  if (timestamp - lastVisualFrameAt >= VISUAL_FRAME_MS) {
-    renderVisuals();
-    lastVisualFrameAt = timestamp;
-  }
-
-  visualFrameId = window.requestAnimationFrame(visualLoop);
-}
-
-function startVisualLoop() {
-  if (visualFrameId !== null || !state || state.playback.status !== 'playing' || document.hidden) return;
-  lastVisualFrameAt = 0;
-  visualFrameId = window.requestAnimationFrame(visualLoop);
-}
-
-function stopVisualLoop() {
-  if (visualFrameId === null) return;
-  window.cancelAnimationFrame(visualFrameId);
-  visualFrameId = null;
-}
-
-function syncVisualLoop() {
-  if (state?.playback.status === 'playing' && !document.hidden) {
-    startVisualLoop();
-  } else {
-    stopVisualLoop();
-  }
+  const active = state.playback.status === 'playing' || state.playback.status === 'paused';
+  const rotation = active ? 12 + progress * 24 : 32;
+  ui.tonearm.style.transform = `rotate(${rotation.toFixed(3)}deg)`;
 }
 
 function renderClock() {
   const position = currentPosition();
   const duration = playbackAnchor.durationMs;
-  const value = `${formatTime(position)} / ${formatTime(duration)}`;
-  ui.timeBadge.textContent = value;
-  ui.progressTime.textContent = value;
+  ui.playtime.textContent = `${formatTime(position)} / ${formatTime(duration)}`;
+}
+
+function animateTrackChange() {
+  ui.trackInfo.classList.remove('changing');
+  void ui.trackInfo.offsetWidth;
+  ui.trackInfo.classList.add('changing');
 }
 
 function applyState(payload, force = false) {
-  const next = normalizedState(payload);
-  const revision = number(next.server_revision ?? next.revision, 0);
-  if (!force && revision && revision <= lastRenderedRevision) return;
+  const next = normalize(payload);
+  if (!force && next.revision && next.revision <= lastRevision) return;
 
-  const nextPlaybackKey = playbackKey(next);
-  const playbackChanged = !state || nextPlaybackKey !== lastPlaybackKey;
+  const nextKey = playbackKey(next);
+  if (!state || nextKey !== lastPlaybackKey) {
+    applyPlaybackAnchor(next);
+    lastPlaybackKey = nextKey;
+  }
 
   state = next;
-  if (revision) lastRenderedRevision = revision;
-  if (playbackChanged) {
-    applyPlaybackAnchor(next);
-    lastPlaybackKey = nextPlaybackKey;
+  if (next.revision) lastRevision = next.revision;
+
+  if (next.track.id !== lastTrackId) {
+    lastTrackId = next.track.id;
+    animateTrackChange();
   }
 
   renderStatic(next);
   renderVisuals();
   renderClock();
   preloadPendingCover(next);
-  syncVisualLoop();
-
-  if (next.current_track.id !== lastTrackId) {
-    lastTrackId = next.current_track.id;
-    document.body.classList.add('track-changing');
-    window.setTimeout(() => document.body.classList.remove('track-changing'), 220);
-  }
 }
 
 async function fetchState(force = false) {
@@ -345,18 +191,14 @@ async function fetchState(force = false) {
     const response = await fetch('/api/state', { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     applyState(await response.json(), force);
-    if (!eventSource || eventSource.readyState !== EventSource.OPEN) {
-      setConnection('polling', 'Polling');
-    }
-  } catch (error) {
-    setConnection('offline', 'Rozłączono');
-    showError(`Nie udało się pobrać stanu: ${error}`);
+  } catch (_) {
+    // Keep rendering the last known state. Reconnect/polling will retry.
   }
 }
 
 function startPolling() {
   if (pollingTimer) return;
-  fetchState(true);
+  fetchState(false);
   pollingTimer = window.setInterval(() => fetchState(false), POLL_INTERVAL_MS);
 }
 
@@ -367,14 +209,13 @@ function stopPolling() {
 }
 
 function closeEvents() {
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
-  }
+  if (!eventSource) return;
+  eventSource.close();
+  eventSource = null;
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer) return;
+  if (reconnectTimer || document.hidden) return;
   reconnectTimer = window.setTimeout(() => {
     reconnectTimer = null;
     connectEvents();
@@ -388,69 +229,47 @@ function connectEvents() {
   }
 
   closeEvents();
-  setConnection('connecting', 'Łączenie...');
   const source = new EventSource('/api/events');
   eventSource = source;
 
   source.addEventListener('open', () => {
     lastSseMessageAt = Date.now();
-    setConnection('live', 'Live');
     stopPolling();
   });
 
   source.addEventListener('state', (event) => {
     lastSseMessageAt = Date.now();
-    setConnection('live', 'Live');
     try {
       applyState(JSON.parse(event.data), false);
-    } catch (error) {
-      showError(`Nieprawidłowy event realtime: ${error}`);
+    } catch (_) {
+      // Ignore malformed realtime payload and wait for the next one.
     }
   });
 
   source.addEventListener('ping', () => {
     lastSseMessageAt = Date.now();
-    setConnection('live', 'Live');
   });
 
   source.addEventListener('error', () => {
     if (eventSource !== source) return;
-    setConnection('polling', 'Polling');
     closeEvents();
     startPolling();
     scheduleReconnect();
   });
 }
 
-function startTimers() {
-  clockTimer = window.setInterval(renderClock, CLOCK_INTERVAL_MS);
-  watchdogTimer = window.setInterval(() => {
-    if (eventSource?.readyState === EventSource.OPEN && Date.now() - lastSseMessageAt > SSE_STALE_MS) {
-      closeEvents();
-      startPolling();
-      scheduleReconnect();
-    }
-  }, 5000);
-}
-
 function handleVisibilityChange() {
   if (document.hidden) {
     closeEvents();
     stopPolling();
-    stopVisualLoop();
     return;
   }
 
   renderVisuals();
   renderClock();
-  syncVisualLoop();
   fetchState(false);
   connectEvents();
 }
-
-ui.spotify.addEventListener('click', (event) => {
-  if (ui.spotify.getAttribute('aria-disabled') === 'true') event.preventDefault();
-});
 
 document.addEventListener('visibilitychange', handleVisibilityChange);
 window.addEventListener('online', () => {
@@ -459,10 +278,18 @@ window.addEventListener('online', () => {
 });
 window.addEventListener('offline', () => {
   closeEvents();
-  stopVisualLoop();
-  setConnection('offline', 'Brak sieci');
+  startPolling();
 });
+
+visualTimer = window.setInterval(renderVisuals, VISUAL_INTERVAL_MS);
+clockTimer = window.setInterval(renderClock, CLOCK_INTERVAL_MS);
+watchdogTimer = window.setInterval(() => {
+  if (eventSource?.readyState === EventSource.OPEN && Date.now() - lastSseMessageAt > SSE_STALE_MS) {
+    closeEvents();
+    startPolling();
+    scheduleReconnect();
+  }
+}, 5000);
 
 fetchState(true);
 connectEvents();
-startTimers();
