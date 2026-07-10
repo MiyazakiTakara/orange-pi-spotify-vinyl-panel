@@ -14,7 +14,6 @@
   transform: translate3d(0, 0, 0);
   transform-origin: 50% 50%;
   backface-visibility: hidden;
-  perspective: 1000px;
   will-change: transform;
   contain: strict;
 }
@@ -52,6 +51,20 @@
 .no-cover {
   transform: translate3d(0, 0, 0);
   backface-visibility: hidden;
+}
+
+/* Avoid layout and global style recalculation while playback advances. */
+.progress-fill,
+.progress-glow {
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: none;
+  will-change: transform;
+}
+
+.arm {
+  transition: none;
 }
 
 /* The old animation targeted the whole record and forced a larger repaint. */
