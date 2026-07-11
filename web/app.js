@@ -12,6 +12,8 @@ const SSE_STALE_MS = 35000;
 const VISUAL_INTERVAL_MS = 100;
 const CLOCK_INTERVAL_MS = 1000;
 const MAX_UNBOUNDED_TIMESTAMP_AGE_MS = 24 * 60 * 60 * 1000;
+const COVER_RETRY_DELAY_MS = 1000;
+const COVER_RETRY_LIMIT = 12;
 
 let state = null;
 let playbackAnchor = {
@@ -26,6 +28,9 @@ let reconnectTimer = null;
 let watchdogTimer = null;
 let visualTimer = null;
 let clockTimer = null;
+let coverRetryTimer = null;
+let coverRequestToken = 0;
+let coverRetryCount = 0;
 let lastSseMessageAt = 0;
 let lastRevision = -1;
 let lastPlaybackKey = '';
@@ -120,33 +125,84 @@ function currentPosition() {
   return clampPosition(position, playbackAnchor.durationMs);
 }
 
-function setCover(track) {
-  const src = track.coverLocalUrl || track.coverUrl || '';
-  if (src === lastCoverSrc) return;
-  lastCoverSrc = src;
+function clearCoverRetry() {
+  if (coverRetryTimer) {
+    window.clearTimeout(coverRetryTimer);
+    coverRetryTimer = null;
+  }
+}
 
-  if (!src) {
-    const placeholder = document.createElement('div');
-    placeholder.className = 'cover-placeholder';
-    placeholder.textContent = '♪';
-    ui.cover.replaceChildren(placeholder);
+function showCoverPlaceholder() {
+  const placeholder = document.createElement('div');
+  placeholder.className = 'cover-placeholder';
+  placeholder.textContent = '♪';
+  ui.cover.replaceChildren(placeholder);
+}
+
+function setCover(track, force = false) {
+  const localSrc = track.coverLocalUrl || '';
+  const remoteSrc = track.coverUrl || '';
+  const baseSrc = localSrc || remoteSrc;
+
+  if (!baseSrc) {
+    clearCoverRetry();
+    coverRequestToken += 1;
+    coverRetryCount = 0;
+    lastCoverSrc = '';
+    showCoverPlaceholder();
     return;
   }
+
+  if (!force && baseSrc === lastCoverSrc) return;
+
+  const sourceChanged = baseSrc !== lastCoverSrc;
+  if (sourceChanged) {
+    clearCoverRetry();
+    coverRetryCount = 0;
+    lastCoverSrc = baseSrc;
+  }
+
+  const requestToken = ++coverRequestToken;
+  const requestSrc = localSrc && coverRetryCount > 0
+    ? `${localSrc}${localSrc.includes('?') ? '&' : '?'}retry=${coverRetryCount}`
+    : baseSrc;
 
   const image = new Image();
   image.alt = '';
   image.decoding = 'async';
   image.referrerPolicy = 'no-referrer';
+
   image.addEventListener('load', () => {
-    if (src === lastCoverSrc) ui.cover.replaceChildren(image);
+    if (requestToken !== coverRequestToken || baseSrc !== lastCoverSrc) return;
+    clearCoverRetry();
+    coverRetryCount = 0;
+    ui.cover.replaceChildren(image);
   }, { once: true });
+
   image.addEventListener('error', () => {
-    if (track.coverUrl && src !== track.coverUrl) {
+    if (requestToken !== coverRequestToken || baseSrc !== lastCoverSrc) return;
+
+    if (localSrc && remoteSrc && baseSrc !== remoteSrc) {
       lastCoverSrc = '';
-      setCover({ ...track, coverLocalUrl: '' });
+      coverRetryCount = 0;
+      setCover({ ...track, coverLocalUrl: '' }, true);
+      return;
     }
+
+    if (localSrc && coverRetryCount < COVER_RETRY_LIMIT) {
+      coverRetryCount += 1;
+      clearCoverRetry();
+      coverRetryTimer = window.setTimeout(() => {
+        coverRetryTimer = null;
+        setCover(track, true);
+      }, COVER_RETRY_DELAY_MS);
+      return;
+    }
+
+    showCoverPlaceholder();
   }, { once: true });
-  image.src = src;
+
+  image.src = requestSrc;
 }
 
 function preloadPendingCover(next) {
@@ -159,7 +215,8 @@ function preloadPendingCover(next) {
 }
 
 function renderStatic(next) {
-  const title = next.track.name || 'Czekam na utwór...';
+  const isActive = next.playback.status === 'playing' || next.playback.status === 'paused';
+  const title = next.track.name || (isActive ? 'Nieznany utwór' : 'Czekam na utwór...');
   ui.title.textContent = title;
   document.title = next.track.name ? `${title} — Orange Pi Audio` : 'Orange Pi Audio';
   ui.stage.classList.toggle('playing', next.playback.status === 'playing');
